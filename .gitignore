@@ -1,0 +1,12 @@
+node_modules/
+dist/
+
+# Secrets — never commit real .env files
+server/.env
+client/.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
