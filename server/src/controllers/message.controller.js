@@ -145,3 +145,82 @@ const sendImage = asyncHandler(async (req, res) => {
 });
 
 module.exports = { list, send, sendImage };
+
+// POST /api/messages/video (multipart: conversationId + video file).
+// Mirrors sendImage: auth -> multer (50MB, video MIME gate) ->
+// requireParticipant (403 outsiders) -> here. Differences: magic-byte check
+// against the video allowlist, resource_type:'video' upload, duration +
+// poster thumbnail metadata, and orphan cleanup if MongoDB fails post-upload.
+const sendVideo = asyncHandler(async (req, res) => {
+  if (!req.file || !req.file.buffer) {
+    throw new AppError('No video provided. Attach an MP4, WebM or QuickTime video.', 400);
+  }
+
+  // Never trust the browser MIME alone: sniff the actual bytes.
+  const FileType = require('file-type');
+  const sniffed = await FileType.fromBuffer(req.file.buffer);
+  const { ALLOWED_VIDEO_MIME } = require('../middleware/uploadVideo');
+  if (!sniffed || !ALLOWED_VIDEO_MIME.has(sniffed.mime)) {
+    throw new AppError('File is not a supported video. Allowed: MP4, WebM, QuickTime.', 400);
+  }
+
+  const storage = require('../config/storage');
+  if (!storage.isConfigured()) {
+    throw new AppError('Video uploads are not configured on the server.', 503);
+  }
+
+  const conv = req.conversation;
+  const receiverId = conv.participants.find((p) => String(p) !== String(req.userId));
+
+  let uploaded;
+  try {
+    uploaded = await storage.uploadVideoBuffer(req.file.buffer, req.file.originalname);
+  } catch (err) {
+    console.warn('[storage] video upload failed:', err.message);
+    throw new AppError('Video could not be stored. Please try again.', 502);
+  }
+
+  const safeName = String(req.file.originalname || 'video').slice(0, 100);
+  let message;
+  try {
+    message = await Message.create({
+      conversationId: conv._id,
+      senderId: req.userId,
+      receiverId,
+      messageType: 'video',
+      video: {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+        filename: safeName,
+        mimeType: sniffed.mime,
+        size: req.file.size,
+        width: uploaded.width || undefined,
+        height: uploaded.height || undefined,
+        duration: uploaded.duration || undefined,
+        thumbnail: storage.videoThumbnailUrl(uploaded.public_id),
+      },
+      status: 'sent',
+    });
+  } catch (err) {
+    // Upload succeeded but persistence failed: remove the orphan asset (best-effort),
+    // then report a friendly error. Never leave a silent orphan if cleanup is possible.
+    try {
+      await storage.deleteAsset(uploaded.public_id, 'video');
+    } catch (cleanupErr) {
+      console.warn('[storage] orphan cleanup failed:', cleanupErr.message);
+    }
+    console.warn('[message] video persist failed after upload:', err.message);
+    throw new AppError('Video could not be saved. Please try again.', 500);
+  }
+
+  await Conversation.findByIdAndUpdate(conv._id, {
+    lastMessage: message._id,
+    lastMessageAt: message.createdAt,
+  });
+
+  emitNewMessage(req, conv, message, req.userId, receiverId);
+
+  res.status(201).json({ message });
+});
+
+module.exports = { list, send, sendImage, sendVideo };

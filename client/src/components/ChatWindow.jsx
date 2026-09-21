@@ -34,7 +34,7 @@ export default function ChatWindow() {
   const { user } = useAuth();
   const { socket, connected } = useSocket();
   const { live } = usePresence();
-  const { conversations, messagesByConv, loadHistory, sendMessage, sendImageMessage, setActiveId, typingByConv } = useChat();
+  const { conversations, messagesByConv, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, setActiveId, typingByConv } = useChat();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [historyError, setHistoryError] = useState('');
@@ -46,49 +46,84 @@ export default function ChatWindow() {
   const [showJump, setShowJump] = useState(false);
   const stickRef = useRef(true);
   const threadRef = useRef(null);
-  // Phase 9A: image attachment. Plain file input (no camera/gallery permissions),
-  // local preview + cancel, 10 MB / JPEG-PNG-WebP-GIF client pre-check
-  // (server re-validates everything: MIME + magic bytes + size + membership).
+  // Phase 9A/9B: attachments. Plain file inputs (no camera/gallery permissions),
+  // local preview + cancel. Client pre-checks type/size; the server re-validates
+  // everything (MIME + magic bytes + size + membership). Upload starts only on Send.
+  const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  const VIDEO_MIME = ['video/mp4', 'video/webm', 'video/quicktime'];
+  const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+  const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
   const fileRef = useRef(null);
-  const [attached, setAttached] = useState(null); // File
+  const videoRef = useRef(null);
+  const [attached, setAttached] = useState(null); // { file, kind: 'image' | 'video' }
   const [previewUrl, setPreviewUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // 0-100 while sending video
   const clearAttachment = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setAttached(null);
     setPreviewUrl(null);
+    setUploadProgress(null);
     if (fileRef.current) fileRef.current.value = '';
+    if (videoRef.current) videoRef.current.value = '';
   };
-  const onFileSelect = (e) => {
-    const file = e.target.files && e.target.files[0];
+  const pickFile = (file, kind) => {
     setError('');
     if (!file) return;
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowed = kind === 'video' ? VIDEO_MIME : IMAGE_MIME;
+    const maxBytes = kind === 'video' ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+    const label = kind === 'video' ? 'MP4, WebM, QuickTime' : 'JPEG, PNG, WebP, GIF';
+    const maxLabel = kind === 'video' ? '50 MB' : '10 MB';
     if (!allowed.includes(file.type)) {
-      setError('Unsupported image type. Allowed: JPEG, PNG, WebP, GIF.');
+      setError(`Unsupported ${kind} type. Allowed: ${label}.`);
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Image must be 10 MB or smaller.');
+    if (file.size > maxBytes) {
+      setError(`${kind === 'video' ? 'Video' : 'Image'} must be ${maxLabel} or smaller.`);
       return;
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setAttached(file);
+    setAttached({ file, kind });
     setPreviewUrl(URL.createObjectURL(file));
+    setUploadProgress(null);
+  };
+  const onFileSelect = (e) => {
+    pickFile(e.target.files && e.target.files[0], 'image');
+  };
+  const onVideoSelect = (e) => {
+    pickFile(e.target.files && e.target.files[0], 'video');
   };
   const onSendImage = async () => {
-    if (!attached || sending || uploading) return;
+    if (!attached || attached.kind !== 'image' || sending || uploading) return;
     setError('');
     setUploading(true);
     stickRef.current = true;
     stopTyping();
     try {
-      await sendImageMessage(id, attached);
+      await sendImageMessage(id, attached.file);
       clearAttachment();
     } catch (err) {
       setError(err?.response?.data?.message || 'Image could not be sent.');
     } finally {
       setUploading(false);
+    }
+  };
+  const onSendVideo = async () => {
+    if (!attached || attached.kind !== 'video' || sending || uploading) return;
+    setError('');
+    setUploading(true);
+    setUploadProgress(0);
+    stickRef.current = true;
+    stopTyping();
+    try {
+      // No duplicate sends while this upload is in flight (guard above + disabled UI).
+      await sendVideoMessage(id, attached.file, (pct) => setUploadProgress(pct));
+      clearAttachment();
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Video could not be sent.');
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
   };
   // Phase 8: composer typing detection. typing_start fires once per burst
@@ -278,9 +313,19 @@ export default function ChatWindow() {
             const tick = m.status === 'read' || m.status === 'delivered' ? '✓✓' : '✓';
             const tickTitle = m.status === 'read' ? 'Read' : m.status === 'delivered' ? 'Delivered' : 'Sent';
             const isImage = m.messageType === 'image' && m.image && m.image.url;
+            const isVideo = m.messageType === 'video' && m.video && m.video.url;
             return (
               <div key={m._id} className={mine ? 'bubble mine' : 'bubble theirs'}>
-                {isImage ? (
+                {isVideo ? (
+                  <video
+                    className="msg-video"
+                    src={m.video.url}
+                    poster={m.video.thumbnail || undefined}
+                    controls
+                    preload="metadata"
+                    playsInline
+                  />
+                ) : isImage ? (
                   <a href={m.image.url} target="_blank" rel="noreferrer">
                     <img
                       className="msg-image"
@@ -313,14 +358,38 @@ export default function ChatWindow() {
         <p className="error chat-error" role="alert">{error}</p>
       )}
       {sending && <p className="hint sending-hint">Sending…</p>}
-      {uploading && <p className="hint sending-hint">Uploading image…</p>}
-      {previewUrl && (
+      {uploading && (
+        <p className="hint sending-hint" aria-live="polite">
+          {attached && attached.kind === 'video'
+            ? `Uploading video…${uploadProgress !== null ? ` ${uploadProgress}%` : ''}`
+            : 'Uploading image…'}
+        </p>
+      )}
+      {uploadProgress !== null && attached && attached.kind === 'video' && (
+        <div className="progress-track" role="progressbar" aria-valuenow={uploadProgress} aria-valuemin="0" aria-valuemax="100" aria-label="Video upload progress">
+          <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
+        </div>
+      )}
+      {previewUrl && attached && (
         <div className="preview-bar">
-          <img className="preview-img" src={previewUrl} alt="Selected image preview" />
+          {attached.kind === 'video' ? (
+            <video className="preview-video" src={previewUrl} controls preload="metadata" playsInline />
+          ) : (
+            <img className="preview-img" src={previewUrl} alt="Selected image preview" />
+          )}
           <div className="preview-actions">
-            <button className="btn small primary" onClick={onSendImage} disabled={uploading}>
-              {uploading ? '…' : 'Send image'}
-            </button>
+            <span className="hint preview-meta">
+              {attached.file.name} · {(attached.file.size / 1048576).toFixed(1)} MB
+            </span>
+            {attached.kind === 'video' ? (
+              <button className="btn small primary" onClick={onSendVideo} disabled={uploading}>
+                {uploading ? '…' : 'Send video'}
+              </button>
+            ) : (
+              <button className="btn small primary" onClick={onSendImage} disabled={uploading}>
+                {uploading ? '…' : 'Send image'}
+              </button>
+            )}
             <button className="btn small" onClick={clearAttachment} disabled={uploading}>
               Cancel
             </button>
@@ -338,6 +407,14 @@ export default function ChatWindow() {
           aria-label="Attach an image"
           hidden
         />
+        <input
+          ref={videoRef}
+          type="file"
+          accept="video/mp4,video/webm,video/quicktime"
+          onChange={onVideoSelect}
+          aria-label="Attach a video"
+          hidden
+        />
         <button
           type="button"
           className="btn attach-btn"
@@ -346,6 +423,15 @@ export default function ChatWindow() {
           title="Attach an image"
         >
           📎
+        </button>
+        <button
+          type="button"
+          className="btn attach-btn"
+          onClick={() => videoRef.current && videoRef.current.click()}
+          aria-label="Attach a video"
+          title="Attach a video"
+        >
+          🎬
         </button>
         <textarea
           value={draft}

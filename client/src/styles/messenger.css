@@ -203,8 +203,14 @@
   border-radius: 12px;
 }
 .preview-img { max-height: 120px; max-width: 40%; border-radius: 10px; object-fit: cover; }
-.preview-actions { display: flex; gap: 8px; }
+.preview-video { max-height: 140px; max-width: 60%; border-radius: 10px; background: #000; }
+.preview-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.preview-meta { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-track { height: 6px; margin: 8px 16px 0; border-radius: 3px; background: #0b0e1c; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); transition: width 0.2s; }
 .msg-image { max-width: 260px; width: 100%; border-radius: 12px; display: block; }
+/* Phase 9B: native player, aspect preserved, layout-safe. No autoplay. */
+.msg-video { max-width: 280px; width: 100%; max-height: 320px; border-radius: 12px; display: block; background: #000; }
 
 .empty-chat {
   margin: auto;

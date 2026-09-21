@@ -3,7 +3,8 @@ const { body } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireParticipant = require('../middleware/requireParticipant');
 const { uploadSingleImage } = require('../middleware/uploadImage');
-const { list, send, sendImage } = require('../controllers/message.controller');
+const { uploadSingleVideo } = require('../middleware/uploadVideo');
+const { list, send, sendImage, sendVideo } = require('../controllers/message.controller');
 
 const router = express.Router();
 router.use(auth);
@@ -32,5 +33,9 @@ router.post(
 // NOTE: '/image' must be registered before '/:conversationId' GET? No conflict:
 // this is POST /image vs GET /:conversationId (different methods), order is safe.
 router.post('/image', uploadSingleImage, requireParticipant, sendImage);
+
+// Phase 9B: video upload. Same chain with video gates.
+// (POST /video vs GET /:conversationId: different methods, no route conflict.)
+router.post('/video', uploadSingleVideo, requireParticipant, sendVideo);
 
 module.exports = router;

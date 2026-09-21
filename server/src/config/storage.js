@@ -24,9 +24,19 @@ function isConfigured() {
 // Buffer -> Cloudinary. resource_type:'image' makes Cloudinary itself reject
 // non-images as a second server-side gate (after our MIME + magic-byte checks).
 function uploadImageBuffer(buffer, filename) {
+  return uploadBuffer(buffer, { resourceType: 'image', timeout: 30000 });
+}
+
+// Phase 9B: video upload. resource_type:'video' + longer timeout (large files).
+// Returns secure_url/public_id/width/height/duration like the image uploader.
+function uploadVideoBuffer(buffer, filename) {
+  return uploadBuffer(buffer, { resourceType: 'video', timeout: 120000 });
+}
+
+function uploadBuffer(buffer, { resourceType, timeout }) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      { folder: 'chatx', resource_type: 'image', timeout: 30000 },
+      { folder: 'chatx', resource_type: resourceType, timeout },
       (err, result) => (err ? reject(err) : resolve(result))
     );
     stream.on('error', reject);
@@ -34,4 +44,15 @@ function uploadImageBuffer(buffer, filename) {
   });
 }
 
-module.exports = { cloudinary, isConfigured, uploadImageBuffer };
+// Poster thumbnail for a stored video: Cloudinary renders the .jpg delivery
+// URL as a still frame — no extra library or eager transformation needed.
+function videoThumbnailUrl(publicId) {
+  return cloudinary.url(publicId, { resource_type: 'video', format: 'jpg' });
+}
+
+// Best-effort orphan cleanup (used when MongoDB persistence fails after upload).
+function deleteAsset(publicId, resourceType) {
+  return cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+}
+
+module.exports = { cloudinary, isConfigured, uploadImageBuffer, uploadVideoBuffer, videoThumbnailUrl, deleteAsset };

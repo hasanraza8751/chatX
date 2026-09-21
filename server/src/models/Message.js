@@ -1,15 +1,15 @@
 const mongoose = require('mongoose');
 
-// Phase 4: persistent TEXT messages. Phase 9A adds IMAGE messages.
+// Phase 4: persistent TEXT messages. Phase 9A adds IMAGE, 9B adds VIDEO messages.
 // A message counts as "sent" only after this document exists in MongoDB.
-// Binary image data is NEVER stored here — only URL + metadata (Cloudinary holds bytes).
+// Binary media is NEVER stored here — only URL + metadata (Cloudinary holds bytes).
 const messageSchema = new mongoose.Schema(
   {
     conversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Conversation', required: true, index: true },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, trim: true, maxlength: 2000 }, // required for text (see pre-validate)
-    messageType: { type: String, enum: ['text', 'image'], default: 'text' },
+    messageType: { type: String, enum: ['text', 'image', 'video'], default: 'text' },
     image: {
       url: { type: String },
       publicId: { type: String },
@@ -19,12 +19,23 @@ const messageSchema = new mongoose.Schema(
       width: { type: Number },
       height: { type: Number },
     },
+    video: {
+      url: { type: String },
+      publicId: { type: String },
+      filename: { type: String },
+      mimeType: { type: String },
+      size: { type: Number },
+      width: { type: Number },
+      height: { type: Number },
+      duration: { type: Number }, // seconds (from Cloudinary)
+      thumbnail: { type: String }, // poster .jpg URL (from Cloudinary)
+    },
     status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
   },
   { timestamps: true }
 );
 
-// Conditional requiredness: text needs content, image needs a stored reference.
+// Conditional requiredness: text needs content, image/video need a stored reference.
 // (Controller validation runs first with friendly errors; this is the DB-level guard.)
 messageSchema.pre('validate', function (next) {
   if (this.messageType === 'text' && !this.content) {
@@ -32,6 +43,9 @@ messageSchema.pre('validate', function (next) {
   }
   if (this.messageType === 'image' && !(this.image && this.image.url)) {
     return next(new Error('Image reference is required.'));
+  }
+  if (this.messageType === 'video' && !(this.video && this.video.url)) {
+    return next(new Error('Video reference is required.'));
   }
   next();
 });

@@ -11,3 +11,18 @@ export const sendImage = (conversationId, file) => {
   form.append('image', file);
   return api.post('/messages/image', form).then((r) => r.data);
 };
+// Phase 9B: video upload with progress (axios onUploadProgress needs no
+// architecture change) and a longer timeout for large files.
+export const sendVideo = (conversationId, file, onProgress) => {
+  const form = new FormData();
+  form.append('conversationId', conversationId);
+  form.append('video', file);
+  return api
+    .post('/messages/video', form, {
+      timeout: 180000,
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+      },
+    })
+    .then((r) => r.data);
+};
