@@ -223,4 +223,90 @@ const sendVideo = asyncHandler(async (req, res) => {
   res.status(201).json({ message });
 });
 
-module.exports = { list, send, sendImage, sendVideo };
+// POST /api/messages/voice (multipart: conversationId + voice file + durationMs).
+// Mirrors sendVideo: auth -> multer (10MB, audio MIME gate) ->
+// requireParticipant (403 outsiders) -> here. Differences: magic-byte check
+// against the voice allowlist, resource_type audio upload, duration from
+// Cloudinary (else client elapsed), orphan cleanup if MongoDB fails.
+const sendVoice = asyncHandler(async (req, res) => {
+  if (!req.file || !req.file.buffer) {
+    throw new AppError('No voice recording provided. Record a voice message first.', 400);
+  }
+  if (req.file.buffer.length === 0) {
+    throw new AppError('Empty recording. Record a voice message first.', 400);
+  }
+
+  // Never trust the browser MIME alone: sniff the actual bytes.
+  const FileType = require('file-type');
+  const sniffed = await FileType.fromBuffer(req.file.buffer);
+  const { ALLOWED_VOICE_MIME } = require('../middleware/uploadVoice');
+  if (!sniffed || !ALLOWED_VOICE_MIME.has(sniffed.mime)) {
+    throw new AppError('File is not a supported voice recording.', 400);
+  }
+
+  const storage = require('../config/storage');
+  if (!storage.isConfigured()) {
+    throw new AppError('Voice uploads are not configured on the server.', 503);
+  }
+
+  const conv = req.conversation;
+  const receiverId = conv.participants.find((p) => String(p) !== String(req.userId));
+
+  // Client elapsed seconds (cross-check only); Cloudinary duration is authoritative.
+  let clientSeconds;
+  const rawDuration = Number(req.body && req.body.durationMs);
+  if (Number.isFinite(rawDuration) && rawDuration > 0 && rawDuration <= 125000) {
+    clientSeconds = Math.round(rawDuration / 100) / 10;
+  }
+
+  let uploaded;
+  try {
+    uploaded = await storage.uploadAudioBuffer(req.file.buffer, req.file.originalname);
+  } catch (err) {
+    console.warn('[storage] voice upload failed:', err.message);
+    throw new AppError('Voice message could not be stored. Please try again.', 502);
+  }
+
+  const safeName = String(req.file.originalname || 'voice-message').slice(0, 100);
+  let message;
+  try {
+    message = await Message.create({
+      conversationId: conv._id,
+      senderId: req.userId,
+      receiverId,
+      messageType: 'voice',
+      voice: {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+        filename: safeName,
+        mimeType: sniffed.mime,
+        size: req.file.size,
+        duration:
+          typeof uploaded.duration === 'number' && uploaded.duration > 0
+            ? Math.round(uploaded.duration * 10) / 10
+            : clientSeconds,
+      },
+      status: 'sent',
+    });
+  } catch (err) {
+    // Upload succeeded but persistence failed: remove the orphan (best-effort).
+    try {
+      await storage.deleteAsset(uploaded.public_id, 'video');
+    } catch (cleanupErr) {
+      console.warn('[storage] orphan cleanup failed:', cleanupErr.message);
+    }
+    console.warn('[message] voice persist failed after upload:', err.message);
+    throw new AppError('Voice message could not be saved. Please try again.', 500);
+  }
+
+  await Conversation.findByIdAndUpdate(conv._id, {
+    lastMessage: message._id,
+    lastMessageAt: message.createdAt,
+  });
+
+  emitNewMessage(req, conv, message, req.userId, receiverId);
+
+  res.status(201).json({ message });
+});
+
+module.exports = { list, send, sendImage, sendVideo, sendVoice };

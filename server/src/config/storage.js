@@ -33,6 +33,12 @@ function uploadVideoBuffer(buffer, filename) {
   return uploadBuffer(buffer, { resourceType: 'video', timeout: 120000 });
 }
 
+// Phase 9C: voice upload. Cloudinary stores audio under the 'video'
+// resource type; voice files are small so 60s is ample.
+function uploadAudioBuffer(buffer, filename) {
+  return uploadBuffer(buffer, { resourceType: 'video', timeout: 60000 });
+}
+
 function uploadBuffer(buffer, { resourceType, timeout }) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -55,4 +61,4 @@ function deleteAsset(publicId, resourceType) {
   return cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
 }
 
-module.exports = { cloudinary, isConfigured, uploadImageBuffer, uploadVideoBuffer, videoThumbnailUrl, deleteAsset };
+module.exports = { cloudinary, isConfigured, uploadImageBuffer, uploadVideoBuffer, uploadAudioBuffer, videoThumbnailUrl, deleteAsset };

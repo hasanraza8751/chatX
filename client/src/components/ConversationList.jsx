@@ -77,7 +77,9 @@ export default function ConversationList({ conversations, activeId, myId, loadin
                       ? '📷 Photo'
                       : c.lastMessage.messageType === 'video'
                         ? '🎬 Video'
-                        : (c.lastMessage.content || '').slice(0, 48)}
+                        : c.lastMessage.messageType === 'voice'
+                          ? '🎙️ Voice message'
+                          : (c.lastMessage.content || '').slice(0, 48)}
                 </span>
               </span>
             </NavLink>

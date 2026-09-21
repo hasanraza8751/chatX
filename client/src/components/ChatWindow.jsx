@@ -34,7 +34,7 @@ export default function ChatWindow() {
   const { user } = useAuth();
   const { socket, connected } = useSocket();
   const { live } = usePresence();
-  const { conversations, messagesByConv, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, setActiveId, typingByConv } = useChat();
+  const { conversations, messagesByConv, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, setActiveId, typingByConv } = useChat();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [historyError, setHistoryError] = useState('');
@@ -126,6 +126,182 @@ export default function ChatWindow() {
       setUploadProgress(null);
     }
   };
+  // Phase 9C: voice recording. MediaRecorder is created ONLY after the user
+  // presses Record (mic permission is never requested on load). Recording stops
+  // via Stop / Cancel / 2-minute cap / send / conversation switch / unmount —
+  // every path stops all MediaStream tracks and revokes Blob URLs.
+  const MAX_VOICE_MS = 2 * 60 * 1000;
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const discardRef = useRef(false);
+  const startTimeRef = useRef(0);
+  const elapsedTimerRef = useRef(null);
+  const capTimerRef = useRef(null);
+  const [recording, setRecording] = useState(false);
+  const [recElapsed, setRecElapsed] = useState(0);
+  const [voicePreview, setVoicePreview] = useState(null); // { blobUrl, blob, mimeType, durationMs }
+  const recorderSupported = () =>
+    typeof window !== 'undefined' &&
+    !!window.MediaRecorder &&
+    !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const pickRecorderMime = () => {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+    for (const t of candidates) {
+      try {
+        if (window.MediaRecorder.isTypeSupported(t)) return t;
+      } catch {
+        /* try next */
+      }
+    }
+    return ''; // constructor default; actual type read back from recorder.mimeType
+  };
+  const stopTracks = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => {
+        try {
+          t.stop();
+        } catch {
+          /* already stopped */
+        }
+      });
+      streamRef.current = null;
+    }
+  };
+  const clearRecTimers = () => {
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+    if (capTimerRef.current) clearTimeout(capTimerRef.current);
+    elapsedTimerRef.current = null;
+    capTimerRef.current = null;
+  };
+  const startRecording = async () => {
+    setError('');
+    if (recording || sending || uploading || voicePreview) return;
+    if (!recorderSupported()) {
+      setError("Voice recording isn't supported in this browser.");
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+        setError('Microphone permission was denied. Allow access to record a voice message.');
+      } else if (err && err.name === 'NotFoundError') {
+        setError('No microphone was found on this device.');
+      } else {
+        setError('Could not start recording. Please try again.');
+      }
+      return;
+    }
+    const mimeType = pickRecorderMime();
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (err) {
+      stream.getTracks().forEach((t) => {
+        try {
+          t.stop();
+        } catch {
+          /* ignore */
+        }
+      });
+      setError("Voice recording isn't supported in this browser.");
+      return;
+    }
+    chunksRef.current = [];
+    discardRef.current = false;
+    streamRef.current = stream;
+    recorderRef.current = recorder;
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    recorder.onerror = () => {
+      setError('Recording failed. Please try again.');
+    };
+    recorder.onstop = () => {
+      clearRecTimers();
+      stopTracks();
+      recorderRef.current = null;
+      setRecording(false);
+      if (discardRef.current) {
+        discardRef.current = false;
+        return; // cancelled: chunks dropped, no preview
+      }
+      const chunks = chunksRef.current;
+      chunksRef.current = [];
+      const total = chunks.reduce((n, c) => n + c.size, 0);
+      if (chunks.length === 0 || total === 0) {
+        setError('Empty recording. Hold the microphone closer and try again.');
+        return;
+      }
+      const actualType = recorder.mimeType || mimeType || 'audio/webm';
+      const blob = new Blob(chunks, { type: actualType });
+      const durationMs = Date.now() - startTimeRef.current;
+      setVoicePreview({ blobUrl: URL.createObjectURL(blob), blob, mimeType: actualType, durationMs });
+    };
+    startTimeRef.current = Date.now();
+    setRecElapsed(0);
+    recorder.start();
+    setRecording(true);
+    elapsedTimerRef.current = setInterval(() => {
+      setRecElapsed(Date.now() - startTimeRef.current);
+    }, 250);
+    // 2-minute cap: auto-stop but PRESERVE the recording (same onstop path).
+    capTimerRef.current = setTimeout(() => {
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        recorderRef.current.stop();
+      }
+    }, MAX_VOICE_MS);
+  };
+  const stopRecording = (discard) => {
+    discardRef.current = !!discard;
+    clearRecTimers();
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') {
+      try {
+        rec.stop(); // onstop builds the preview (or drops it when discarding)
+      } catch {
+        stopTracks();
+        recorderRef.current = null;
+        setRecording(false);
+      }
+    } else {
+      stopTracks();
+      recorderRef.current = null;
+      setRecording(false);
+      if (discard) {
+        if (voicePreview) URL.revokeObjectURL(voicePreview.blobUrl);
+        setVoicePreview(null);
+      }
+    }
+  };
+  const cancelVoice = () => {
+    if (voicePreview) URL.revokeObjectURL(voicePreview.blobUrl);
+    setVoicePreview(null);
+    stopRecording(true);
+  };
+  const onSendVoice = async () => {
+    if (!voicePreview || sending || uploading) return;
+    setError('');
+    setUploading(true);
+    stickRef.current = true;
+    stopTyping();
+    try {
+      await sendVoiceMessage(id, voicePreview);
+      if (voicePreview) URL.revokeObjectURL(voicePreview.blobUrl);
+      setVoicePreview(null);
+    } catch (err) {
+      // Keep the preview so the user can retry.
+      setError(err?.response?.data?.message || 'Voice message could not be sent.');
+    } finally {
+      setUploading(false);
+    }
+  };
+  const formatElapsed = (ms) => {
+    const s = Math.floor(ms / 1000);
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
   // Phase 8: composer typing detection. typing_start fires once per burst
   // (throttled by the flag); typing_stop fires after 1.5s idle, on send,
   // on clear, and on conversation close/unmount.
@@ -184,10 +360,39 @@ export default function ChatWindow() {
     return () => setActiveId(null);
   }, [id, loadHistory, setActiveId]);
 
-  // Switching conversation/unmount discards any unsent attachment preview.
+  // Switching conversation/unmount discards any unsent attachment preview,
+  // stops an active recording, and releases mic tracks + Blob URLs.
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
+      discardRef.current = true;
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+      if (capTimerRef.current) clearTimeout(capTimerRef.current);
+      elapsedTimerRef.current = null;
+      capTimerRef.current = null;
+      try {
+        if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+          recorderRef.current.stop();
+        }
+      } catch {
+        /* ignore */
+      }
+      recorderRef.current = null;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {
+            /* ignore */
+          }
+        });
+        streamRef.current = null;
+      }
+      setRecording(false);
+      setVoicePreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev.blobUrl);
+        return null;
+      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -314,9 +519,17 @@ export default function ChatWindow() {
             const tickTitle = m.status === 'read' ? 'Read' : m.status === 'delivered' ? 'Delivered' : 'Sent';
             const isImage = m.messageType === 'image' && m.image && m.image.url;
             const isVideo = m.messageType === 'video' && m.video && m.video.url;
+            const isVoice = m.messageType === 'voice' && m.voice && m.voice.url;
             return (
               <div key={m._id} className={mine ? 'bubble mine' : 'bubble theirs'}>
-                {isVideo ? (
+                {isVoice ? (
+                  <div className="voice-msg">
+                    <audio className="msg-audio" src={m.voice.url} controls preload="metadata" />
+                    <span className="hint voice-dur">
+                      {typeof m.voice.duration === 'number' ? formatElapsed(m.voice.duration * 1000) : ''}
+                    </span>
+                  </div>
+                ) : isVideo ? (
                   <video
                     className="msg-video"
                     src={m.video.url}
@@ -358,12 +571,15 @@ export default function ChatWindow() {
         <p className="error chat-error" role="alert">{error}</p>
       )}
       {sending && <p className="hint sending-hint">Sending…</p>}
-      {uploading && (
+      {uploading && !voicePreview && (
         <p className="hint sending-hint" aria-live="polite">
           {attached && attached.kind === 'video'
             ? `Uploading video…${uploadProgress !== null ? ` ${uploadProgress}%` : ''}`
             : 'Uploading image…'}
         </p>
+      )}
+      {uploading && voicePreview && (
+        <p className="hint sending-hint" aria-live="polite">Uploading voice message…</p>
       )}
       {uploadProgress !== null && attached && attached.kind === 'video' && (
         <div className="progress-track" role="progressbar" aria-valuenow={uploadProgress} aria-valuemin="0" aria-valuemax="100" aria-label="Video upload progress">
@@ -396,6 +612,32 @@ export default function ChatWindow() {
           </div>
         </div>
       )}
+      {recording && (
+        <div className="rec-bar" role="status" aria-live="polite">
+          <span className="rec-dot" aria-hidden="true" />
+          <span>🎙️ Recording {formatElapsed(recElapsed)}</span>
+          <button className="btn small primary" onClick={() => stopRecording(false)} disabled={uploading}>
+            Stop
+          </button>
+          <button className="btn small" onClick={() => stopRecording(true)} disabled={uploading}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {voicePreview && !recording && (
+        <div className="preview-bar">
+          <audio className="preview-audio" src={voicePreview.blobUrl} controls preload="metadata" />
+          <div className="preview-actions">
+            <span className="hint preview-meta">🎙️ {formatElapsed(voicePreview.durationMs)}</span>
+            <button className="btn small primary" onClick={onSendVoice} disabled={uploading}>
+              {uploading ? '…' : 'Send voice'}
+            </button>
+            <button className="btn small" onClick={cancelVoice} disabled={uploading}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <TypingIndicator typingByConv={typingByConv} convId={id} participants={conv?.participants} />
 
       <form className="composer" onSubmit={onSend}>
@@ -421,6 +663,7 @@ export default function ChatWindow() {
           onClick={() => fileRef.current && fileRef.current.click()}
           aria-label="Attach an image"
           title="Attach an image"
+          disabled={recording || uploading || !!voicePreview}
         >
           📎
         </button>
@@ -430,8 +673,19 @@ export default function ChatWindow() {
           onClick={() => videoRef.current && videoRef.current.click()}
           aria-label="Attach a video"
           title="Attach a video"
+          disabled={recording || uploading || !!voicePreview}
         >
           🎬
+        </button>
+        <button
+          type="button"
+          className="btn attach-btn"
+          onClick={startRecording}
+          aria-label="Record a voice message"
+          title="Record a voice message"
+          disabled={recording || uploading || !!voicePreview || !!attached}
+        >
+          🎙️
         </button>
         <textarea
           value={draft}
@@ -442,8 +696,9 @@ export default function ChatWindow() {
           aria-label="Type a message"
           maxLength={2000}
           rows={1}
+          disabled={recording}
         />
-        <button className="btn primary" disabled={sending || !draft.trim()}>
+        <button className="btn primary" disabled={sending || recording || !draft.trim()}>
           {sending ? '…' : 'Send'}
         </button>
       </form>

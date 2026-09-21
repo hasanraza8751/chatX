@@ -211,6 +211,22 @@
 .msg-image { max-width: 260px; width: 100%; border-radius: 12px; display: block; }
 /* Phase 9B: native player, aspect preserved, layout-safe. No autoplay. */
 .msg-video { max-width: 280px; width: 100%; max-height: 320px; border-radius: 12px; display: block; background: #000; }
+/* Phase 9C: recorder + voice bubbles. Native audio player, no autoplay, no waveform lib. */
+.rec-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #0b0e1c;
+}
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #ff5252; animation: tblink 1.2s infinite; flex-shrink: 0; }
+.preview-audio { width: 100%; }
+.voice-msg { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }
+.msg-audio { width: 230px; max-width: 100%; }
+.voice-dur { font-size: 11px; }
 
 .empty-chat {
   margin: auto;

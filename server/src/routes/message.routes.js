@@ -4,7 +4,8 @@ const auth = require('../middleware/auth');
 const requireParticipant = require('../middleware/requireParticipant');
 const { uploadSingleImage } = require('../middleware/uploadImage');
 const { uploadSingleVideo } = require('../middleware/uploadVideo');
-const { list, send, sendImage, sendVideo } = require('../controllers/message.controller');
+const { uploadSingleVoice } = require('../middleware/uploadVoice');
+const { list, send, sendImage, sendVideo, sendVoice } = require('../controllers/message.controller');
 
 const router = express.Router();
 router.use(auth);
@@ -37,5 +38,9 @@ router.post('/image', uploadSingleImage, requireParticipant, sendImage);
 // Phase 9B: video upload. Same chain with video gates.
 // (POST /video vs GET /:conversationId: different methods, no route conflict.)
 router.post('/video', uploadSingleVideo, requireParticipant, sendVideo);
+
+// Phase 9C: voice upload. Same chain with voice gates; field name is 'voice'
+// plus an optional durationMs text field (multipart body parsed by multer).
+router.post('/voice', uploadSingleVoice, requireParticipant, sendVoice);
 
 module.exports = router;

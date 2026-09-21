@@ -26,3 +26,12 @@ export const sendVideo = (conversationId, file, onProgress) => {
     })
     .then((r) => r.data);
 };
+// Phase 9C: voice upload. Small files (2-minute cap), no progress bar needed.
+export const sendVoice = (conversationId, { blob, filename, mimeType, durationMs }) => {
+  const form = new FormData();
+  form.append('conversationId', conversationId);
+  form.append('voice', blob, filename);
+  form.append('durationMs', String(durationMs));
+  form.append('mimeType', mimeType);
+  return api.post('/messages/voice', form, { timeout: 120000 }).then((r) => r.data);
+};

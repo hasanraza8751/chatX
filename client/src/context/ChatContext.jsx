@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { listConversations } from '../api/conversations.js';
-import { listMessages, sendMessage as sendMessageApi, sendImage as sendImageApi, sendVideo as sendVideoApi } from '../api/messages.js';
+import { listMessages, sendMessage as sendMessageApi, sendImage as sendImageApi, sendVideo as sendVideoApi, sendVoice as sendVoiceApi } from '../api/messages.js';
 import { useSocket } from './SocketContext.jsx';
 import { useAuth } from './AuthContext.jsx';
 
@@ -113,6 +113,30 @@ export function ChatProvider({ children }) {
   // the socket echo of the persisted doc merges by _id.
   const sendVideoMessage = useCallback(async (conversationId, file, onProgress) => {
     const data = await sendVideoApi(conversationId, file, onProgress);
+    const msg = data.message;
+    setMessagesByConv((prev) => ({
+      ...prev,
+      [conversationId]: upsertMessage(prev[conversationId] || [], msg),
+    }));
+    setConversations((prev) =>
+      prev
+        .map((c) => (String(c._id) === String(conversationId) ? { ...c, lastMessage: msg, lastMessageAt: msg.createdAt } : c))
+        .sort((a, b) => new Date(b.lastMessageAt || b.updatedAt) - new Date(a.lastMessageAt || a.updatedAt))
+    );
+    return msg;
+  }, []);
+
+  // Phase 9C: voice send. Same dedupe/sidebar treatment;
+  // the socket echo of the persisted doc merges by _id.
+  const sendVoiceMessage = useCallback(async (conversationId, preview) => {
+    const base = String(preview.mimeType || '').split(';')[0].trim().toLowerCase();
+    const ext = base.includes('mp4') ? 'mp4' : base.includes('ogg') ? 'ogg' : 'webm';
+    const data = await sendVoiceApi(conversationId, {
+      blob: preview.blob,
+      filename: `voice-message.${ext}`,
+      mimeType: preview.mimeType,
+      durationMs: preview.durationMs,
+    });
     const msg = data.message;
     setMessagesByConv((prev) => ({
       ...prev,
@@ -263,7 +287,7 @@ export function ChatProvider({ children }) {
   }, [socket, ackRead]);
 
   const value = useMemo(
-    () => ({ conversations, messagesByConv, activeId, setActiveId, loadingList, loadConversations, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, typingByConv }),
+    () => ({ conversations, messagesByConv, activeId, setActiveId, loadingList, loadConversations, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, typingByConv }),
     [conversations, messagesByConv, activeId, loadingList, loadConversations, loadHistory, sendMessage, typingByConv]
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// Phase 4: persistent TEXT messages. Phase 9A adds IMAGE, 9B adds VIDEO messages.
+// Phase 4: persistent TEXT messages. Phase 9A IMAGE, 9B VIDEO, 9C VOICE.
 // A message counts as "sent" only after this document exists in MongoDB.
 // Binary media is NEVER stored here — only URL + metadata (Cloudinary holds bytes).
 const messageSchema = new mongoose.Schema(
@@ -9,7 +9,7 @@ const messageSchema = new mongoose.Schema(
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, trim: true, maxlength: 2000 }, // required for text (see pre-validate)
-    messageType: { type: String, enum: ['text', 'image', 'video'], default: 'text' },
+    messageType: { type: String, enum: ['text', 'image', 'video', 'voice'], default: 'text' },
     image: {
       url: { type: String },
       publicId: { type: String },
@@ -30,12 +30,20 @@ const messageSchema = new mongoose.Schema(
       duration: { type: Number }, // seconds (from Cloudinary)
       thumbnail: { type: String }, // poster .jpg URL (from Cloudinary)
     },
+    voice: {
+      url: { type: String },
+      publicId: { type: String },
+      filename: { type: String },
+      mimeType: { type: String }, // server-sniffed container type
+      size: { type: Number }, // bytes
+      duration: { type: Number }, // seconds (Cloudinary, else client elapsed)
+    },
     status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
   },
   { timestamps: true }
 );
 
-// Conditional requiredness: text needs content, image/video need a stored reference.
+// Conditional requiredness: text needs content, media needs a stored reference.
 // (Controller validation runs first with friendly errors; this is the DB-level guard.)
 messageSchema.pre('validate', function (next) {
   if (this.messageType === 'text' && !this.content) {
@@ -46,6 +54,9 @@ messageSchema.pre('validate', function (next) {
   }
   if (this.messageType === 'video' && !(this.video && this.video.url)) {
     return next(new Error('Video reference is required.'));
+  }
+  if (this.messageType === 'voice' && !(this.voice && this.voice.url)) {
+    return next(new Error('Voice reference is required.'));
   }
   next();
 });
