@@ -39,7 +39,7 @@ export default function Landing() {
 
       <section className="card">
         <h2>Backend status</h2>
-        {health.state === 'checking' && <p>Checking http://localhost:5000/api/health…</p>}
+        {health.state === 'checking' && <p>Checking backend status…</p>}
         {health.state === 'ok' && (
           <p className="ok">
             Connected — {health.data.service} ({health.data.env}) at {health.data.time}

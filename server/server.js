@@ -27,7 +27,7 @@ async function start() {
   // Listen FIRST so /api/health works even when MongoDB is down (Phase 1).
   // DB connects in the background; later phases require DB for auth/messaging.
   server.listen(env.PORT, () => {
-    console.log(`[server] ChatX running on http://localhost:${env.PORT} (${env.NODE_ENV})`);
+    console.log(`[server] ChatX listening on port ${env.PORT} (${env.NODE_ENV})`);
     console.log(`[server] Allowing frontend origin: ${env.CLIENT_URL}`);
   });
 
@@ -49,3 +49,42 @@ async function start() {
 }
 
 start();
+
+// Graceful shutdown: stop accepting HTTP, close Socket.IO, disconnect Mongo,
+// then exit. Single-flight guarded; force-exits after 10s so a stuck
+// connection can never block redeploys forever. No request/upload is
+// force-killed before the drain attempt.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} received, draining...`);
+  const force = setTimeout(() => {
+    console.warn('[server] Shutdown timed out, forcing exit.');
+    process.exit(1);
+  }, 10000);
+  if (force.unref) force.unref();
+  try {
+    await new Promise((resolve) => server.close(resolve));
+    console.log('[server] HTTP server closed.');
+  } catch (err) {
+    console.warn('[server] HTTP close failed:', err.message);
+  }
+  try {
+    io.close();
+    console.log('[server] Socket.IO closed.');
+  } catch (err) {
+    console.warn('[server] Socket.IO close failed:', err.message);
+  }
+  try {
+    const mongoose = require('mongoose');
+    await mongoose.disconnect();
+    console.log('[server] MongoDB disconnected.');
+  } catch (err) {
+    console.warn('[server] MongoDB disconnect failed:', err.message);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

@@ -20,6 +20,28 @@ const env = {
   isProd: (process.env.NODE_ENV || 'development') === 'production',
 };
 
+// Production fail-fast: never silently fall back to localhost MongoDB,
+// localhost CLIENT_URL, or missing secrets/credentials. Names only in the
+// error — never values.
+if (env.isProd) {
+  const REQUIRED_IN_PROD = [
+    'PORT',
+    'NODE_ENV',
+    'MONGODB_URI',
+    'JWT_SECRET',
+    'CLIENT_URL',
+    'CLOUDINARY_CLOUD_NAME',
+    'CLOUDINARY_API_KEY',
+    'CLOUDINARY_API_SECRET',
+  ];
+  const missing = REQUIRED_IN_PROD.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required env vars in production: ${missing.join(', ')} (see server/.env.example)`
+    );
+  }
+}
+
 if (env.JWT_SECRET && env.JWT_SECRET.length < 32) {
   console.warn('[env] WARNING: JWT_SECRET should be at least 32 characters long.');
 }

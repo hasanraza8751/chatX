@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
+const mongoose = require('mongoose');
 const env = require('./config/env');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -27,6 +28,8 @@ app.use(cookieParser());
 app.use(express.json({ limit: '100kb' }));
 
 // Health check: used by Phase 1 test + frontend "backend status" indicator.
+// Liveness only: answers whether the process is up. Use /api/ready for
+// deployment gates that must also verify MongoDB connectivity.
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
@@ -34,6 +37,20 @@ app.get('/api/health', (req, res) => {
     env: env.NODE_ENV,
     time: new Date().toISOString(),
   });
+});
+
+// Readiness probe for production: 200 only when MongoDB is reachable.
+// Never exposes URIs, credentials, or stack traces.
+app.get('/api/ready', async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ ok: false, message: 'Database not connected.' });
+    }
+    await mongoose.connection.db.admin().ping();
+    return res.json({ ok: true, service: 'chatx-server', time: new Date().toISOString() });
+  } catch (err) {
+    return res.status(503).json({ ok: false, message: 'Database not ready.' });
+  }
 });
 
 // Placeholder routers land here in Phase 2+ (auth/users/conversations/messages).
