@@ -42,11 +42,31 @@ async function findOrCreateOneToOne(myId, otherId) {
 }
 
 async function listForUser(myId) {
-  return Conversation.find({ participants: myId })
+  const convs = await Conversation.find({ participants: myId })
     .sort({ lastMessageAt: -1, updatedAt: -1 })
     .populate('participants', PUBLIC_USER_FIELDS)
     .populate('lastMessage')
     .lean();
+  // Phase 10: unread counts derived from existing receipt state —
+  // my received messages not yet read. No new collection, no schema change.
+  // Reloads/reconnects reconstruct counts from this persisted truth.
+  if (convs.length === 0) return convs;
+  const Message = require('../models/Message');
+  const counts = await Message.aggregate([
+    {
+      $match: {
+        conversationId: { $in: convs.map((c) => c._id) },
+        receiverId: new mongoose.Types.ObjectId(String(myId)),
+        status: { $ne: 'read' },
+      },
+    },
+    { $group: { _id: '$conversationId', count: { $sum: 1 } } },
+  ]);
+  const byConv = new Map(counts.map((r) => [String(r._id), r.count]));
+  convs.forEach((c) => {
+    c.unreadCount = byConv.get(String(c._id)) || 0;
+  });
+  return convs;
 }
 
 module.exports = { findOrCreateOneToOne, listForUser, PUBLIC_USER_FIELDS };

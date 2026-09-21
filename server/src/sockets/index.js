@@ -121,6 +121,43 @@ function initSockets(io) {
       }
     });
 
+    // Phase 10: bulk read on conversation open. Marks ALL my received
+    // sent|delivered messages in the conversation as read (same rules as 7C,
+    // participant-checked, receiver-only, idempotent) and notifies ONLY the
+    // other participant(s) so sender ticks update. No global broadcast.
+    socket.on('conversation_read', async ({ conversationId } = {}) => {
+      try {
+        const mongoose = require('mongoose');
+        if (!conversationId || !mongoose.Types.ObjectId.isValid(conversationId)) return;
+        const Conversation = require('../models/Conversation');
+        const conv = await Conversation.findById(conversationId).select('participants').lean();
+        if (!conv) return;
+        const member = (conv.participants || []).some((p) => String(p) === userId);
+        if (!member) return; // outsider cannot clear anyone's unread state
+        const Message = require('../models/Message');
+        const res = await Message.updateMany(
+          {
+            conversationId: conv._id,
+            receiverId: new mongoose.Types.ObjectId(userId),
+            status: { $in: ['sent', 'delivered'] },
+          },
+          { $set: { status: 'read' } }
+        );
+        if (!res.modifiedCount) return; // nothing unread: stay silent
+        (conv.participants || [])
+          .map(String)
+          .filter((p) => p !== userId)
+          .forEach((pid) =>
+            io.to(`user:${pid}`).emit('conversation_read', {
+              conversationId: String(conv._id),
+              readerId: userId,
+            })
+          );
+      } catch (err) {
+        console.warn('[socket] conversation_read failed:', err.message);
+      }
+    });
+
     // Phase 8: typing indicators. Authenticated + participant-only, ephemeral
     // (never persisted). Only the OTHER participants are notified.
     const verifyTyping = async (conversationId) => {

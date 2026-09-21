@@ -5,12 +5,13 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { usePresence } from '../context/PresenceContext.jsx';
 import ConversationList from '../components/ConversationList.jsx';
 import NewChatSearch from '../components/NewChatSearch.jsx';
+import Toasts from '../components/Toasts.jsx';
 
 // Desktop: sidebar + conversation side by side.
 // Mobile (narrow): list view for /messages, chat view for /messages/:id (back button returns).
 export default function MessengerLayout() {
   const { user, logout } = useAuth();
-  const { conversations, loadingList, loadConversations } = useChat();
+  const { conversations, loadingList, loadConversations, unreadByConv } = useChat();
   const { live } = usePresence();
   const { id } = useParams();
   const location = useLocation();
@@ -42,6 +43,7 @@ export default function MessengerLayout() {
             error=""
             onRetry={loadConversations}
             livePresence={live}
+            unreadByConv={unreadByConv}
           />
         </div>
         <div className="m-side-foot">
@@ -52,6 +54,7 @@ export default function MessengerLayout() {
       <section className="m-main">
         <Outlet />
       </section>
+      <Toasts />
     </div>
   );
 }

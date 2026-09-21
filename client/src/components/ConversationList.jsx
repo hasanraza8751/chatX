@@ -19,7 +19,7 @@ function SkeletonRow() {
   );
 }
 
-export default function ConversationList({ conversations, activeId, myId, loading, error, onRetry, livePresence }) {
+export default function ConversationList({ conversations, activeId, myId, loading, error, onRetry, livePresence, unreadByConv }) {
   if (loading && conversations.length === 0) {
     return (
       <ul className="conv-list" aria-label="Loading conversations">
@@ -51,6 +51,7 @@ export default function ConversationList({ conversations, activeId, myId, loadin
         const other = otherParticipant(c, myId);
         const isActive = String(c._id) === String(activeId);
         const status = resolvePresence(livePresence || {}, other);
+        const unread = (unreadByConv && unreadByConv[String(c._id)]) || 0;
         return (
           <li key={c._id}>
             <NavLink
@@ -82,6 +83,11 @@ export default function ConversationList({ conversations, activeId, myId, loadin
                           : (c.lastMessage.content || '').slice(0, 48)}
                 </span>
               </span>
+              {unread > 0 && (
+                <span className="unread-badge" aria-label={`${unread} unread messages`}>
+                  {unread > 99 ? '99+' : unread}
+                </span>
+              )}
             </NavLink>
           </li>
         );

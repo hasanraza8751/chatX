@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useSocket } from '../context/SocketContext.jsx';
 import Avatar from './Avatar.jsx';
 import { formatClock, formatLastSeen } from '../utils/formatTime.js';
+import { ensureNotificationPermission } from '../utils/notifications.js';
 import { usePresence, resolvePresence } from '../context/PresenceContext.jsx';
 
 const PAGE_SIZE = 30;
@@ -63,7 +64,7 @@ export default function ChatWindow() {
   const { user } = useAuth();
   const { socket, connected } = useSocket();
   const { live } = usePresence();
-  const { conversations, messagesByConv, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, setActiveId, typingByConv } = useChat();
+  const { conversations, messagesByConv, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, setActiveId, typingByConv, markConversationRead } = useChat();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [historyError, setHistoryError] = useState('');
@@ -456,11 +457,16 @@ export default function ChatWindow() {
     setMenuFor(null);
     setCopiedId(null);
     loadHistory(id, 1, PAGE_SIZE)
-      .then((data) => setHasMore(!!data.hasMore))
+      .then((data) => {
+        setHasMore(!!data.hasMore);
+        // Phase 10: opening clears this conversation's unread state
+        // (bulk read persisted server-side; sender ticks update).
+        markConversationRead(id);
+      })
       .catch((err) => setHistoryError(err?.response?.data?.message || 'Could not load messages.'))
       .finally(() => setLoading(false));
     return () => setActiveId(null);
-  }, [id, loadHistory, setActiveId]);
+  }, [id, loadHistory, setActiveId, markConversationRead]);
 
   // Switching conversation/unmount discards any unsent attachment preview,
   // stops an active recording, and releases mic tracks + Blob URLs.
@@ -565,6 +571,9 @@ export default function ChatWindow() {
     setSending(true);
     stickRef.current = true;
     stopTyping(); // sent => no longer typing (server also clears on persist)
+    // Phase 10: first user-gesture send is the right moment to offer browser
+    // notifications (never requested on page load). Fire-and-forget.
+    ensureNotificationPermission().catch(() => {});
     try {
       await sendMessage(id, content, replyingTo ? String(replyingTo._id) : undefined);
       setDraft('');

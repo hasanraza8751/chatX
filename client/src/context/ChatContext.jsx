@@ -3,6 +3,7 @@ import { listConversations } from '../api/conversations.js';
 import { listMessages, sendMessage as sendMessageApi, sendImage as sendImageApi, sendVideo as sendVideoApi, sendVoice as sendVoiceApi } from '../api/messages.js';
 import { useSocket } from './SocketContext.jsx';
 import { useAuth } from './AuthContext.jsx';
+import { previewFor, showBrowserNotification } from '../utils/notifications.js';
 
 // Holds conversation list + per-conversation messages.
 // History always comes from REST (source of truth); Socket only appends
@@ -29,24 +30,78 @@ export function ChatProvider({ children }) {
   // Phase 8: ephemeral typing flags per conversation (never persisted).
   const [typingByConv, setTypingByConv] = useState({});
   const typingTimers = useRef({});
+  // Phase 10: unread counts (seeded from persisted server state, updated live)
+  // + transient in-app toasts. notifiedRef dedupes per message _id so reloads
+  // and re-renders can never double-notify (history loads never notify).
+  const [unreadByConv, setUnreadByConv] = useState({});
+  const [toasts, setToasts] = useState([]);
+  const notifiedRef = useRef(new Set());
   // Mirrors for use inside socket callbacks (avoid stale closures).
   const activeRef = useRef(null);
   const messagesRef = useRef({});
+  const conversationsRef = useRef([]);
+  const unreadRef = useRef({});
+  useEffect(() => {
+    unreadRef.current = unreadByConv;
+  }, [unreadByConv]);
   useEffect(() => {
     activeRef.current = activeId ? String(activeId) : null;
   }, [activeId]);
   useEffect(() => {
     messagesRef.current = messagesByConv;
   }, [messagesByConv]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   const loadConversations = useCallback(async () => {
     setLoadingList(true);
     try {
       const data = await listConversations();
-      setConversations(data.conversations || []);
+      const convs = data.conversations || [];
+      setConversations(convs);
+      // Phase 10: rebuild unread state from persisted truth (reload/reconnect safe).
+      setUnreadByConv((prev) => {
+        const next = {};
+        convs.forEach((c) => {
+          next[String(c._id)] = typeof c.unreadCount === 'number' ? c.unreadCount : prev[String(c._id)] || 0;
+        });
+        return next;
+      });
     } finally {
       setLoadingList(false);
     }
+  }, []);
+
+  // Phase 10: opening a conversation clears its unread state. Marks local
+  // received copies read, zeroes the badge, and emits the bulk read so the
+  // server persists it and the sender's ticks update. Skips the emit when
+  // nothing is actually unread (keeps reconnects quiet).
+  const markConversationRead = useCallback((conversationId) => {
+    const cid = String(conversationId);
+    const loaded = messagesRef.current[cid] || [];
+    const hasUnread =
+      (unreadRef.current[cid] || 0) > 0 ||
+      loaded.some((m) => String(m.receiverId) === myId && m.status !== 'read');
+    setUnreadByConv((prev) => (prev[cid] ? { ...prev, [cid]: 0 } : prev));
+    if (myId) {
+      setMessagesByConv((prev) => {
+        if (!prev[cid]) return prev;
+        return {
+          ...prev,
+          [cid]: prev[cid].map((m) =>
+            String(m.receiverId) === myId && m.status !== 'read' ? { ...m, status: 'read' } : m
+          ),
+        };
+      });
+    }
+    if (socket && hasUnread) {
+      socket.emit('conversation_read', { conversationId: cid });
+    }
+  }, [socket, myId]);
+
+  const dismissToast = useCallback((toastId) => {
+    setToasts((prev) => prev.filter((t) => t.id !== toastId));
   }, []);
 
   // Phase 7C gate: read-ack ONLY the open + visible conversation.
@@ -179,6 +234,31 @@ export function ChatProvider({ children }) {
       if (myId && String(message.receiverId) === myId) {
         ackRead(cid, [message]);
       }
+      // Phase 10: notify ONLY for incoming messages in a conversation the user
+      // is NOT actively viewing (open conv + visible tab = silent, read path
+      // handles it; a hidden tab counts as not viewing). Deduped per _id;
+      // history loads never reach this handler.
+      const viewing =
+        activeRef.current === cid &&
+        (typeof document === 'undefined' || document.visibilityState === 'visible');
+      if (
+        myId &&
+        String(message.receiverId) === myId &&
+        message.status !== 'read' &&
+        !viewing &&
+        !notifiedRef.current.has(String(message._id))
+      ) {
+        notifiedRef.current.add(String(message._id));
+        setUnreadByConv((prev) => ({ ...prev, [cid]: (prev[cid] || 0) + 1 }));
+        const conv = conversationsRef.current.find((c) => String(c._id) === cid);
+        const other = (conv?.participants || []).find((p) => String(p._id || p) !== myId) || {};
+        const senderName = other.name || other.username || 'New message';
+        const preview = previewFor(message);
+        setToasts((prev) =>
+          [...prev, { id: String(message._id), conversationId: cid, senderName, preview, ts: Date.now() }].slice(-5)
+        );
+        showBrowserNotification({ title: senderName, body: preview, conversationId: cid });
+      }
       setMessagesByConv((prev) => {
         if (!prev[cid]) return prev; // history not loaded yet → REST will fetch on open
         return { ...prev, [cid]: upsertMessage(prev[cid], message) };
@@ -263,17 +343,43 @@ export function ChatProvider({ children }) {
     };
     socket.on('message_delivered', onDelivered);
     socket.on('message_read', onRead);
+    // Phase 10: bulk-read echo for the sender — flip ALL my sent messages in
+    // that conversation to read (ticks catch up even for older pages).
+    const onConversationRead = ({ conversationId, readerId }) => {
+      if (!conversationId || !myId || String(readerId) === myId) return;
+      const cid = String(conversationId);
+      setMessagesByConv((prev) => {
+        if (!prev[cid]) return prev;
+        return {
+          ...prev,
+          [cid]: prev[cid].map((m) =>
+            String(m.senderId) === myId && m.status !== 'read' ? { ...m, status: 'read' } : m
+          ),
+        };
+      });
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (String(c._id) !== cid) return c;
+          if (!c.lastMessage || String(c.lastMessage.senderId) !== myId) return c;
+          if (c.lastMessage.status === 'read') return c;
+          return { ...c, lastMessage: { ...c.lastMessage, status: 'read' } };
+        })
+      );
+    };
+    socket.on('conversation_read', onConversationRead);
     return () => {
       socket.off('receive_message', onReceive);
       socket.off('conversation_updated', onUpdated);
       socket.off('message_delivered', onDelivered);
       socket.off('message_read', onRead);
+      socket.off('conversation_read', onConversationRead);
       socket.off('typing_update', onTyping);
     };
   }, [socket, myId, ackRead, loadConversations]);
 
   // Phase 7C: returning to a visible tab re-acks the open conversation's
   // displayed messages (covers messages that arrived while hidden).
+  // Phase 10: also clears that conversation's unread state (bulk read).
   useEffect(() => {
     if (!socket) return;
     const onVisible = () => {
@@ -281,14 +387,15 @@ export function ChatProvider({ children }) {
       const cid = activeRef.current;
       if (!cid) return;
       ackRead(cid, messagesRef.current[cid] || []);
+      markConversationRead(cid);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [socket, ackRead]);
+  }, [socket, ackRead, markConversationRead]);
 
   const value = useMemo(
-    () => ({ conversations, messagesByConv, activeId, setActiveId, loadingList, loadConversations, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, typingByConv }),
-    [conversations, messagesByConv, activeId, loadingList, loadConversations, loadHistory, sendMessage, typingByConv]
+    () => ({ conversations, messagesByConv, activeId, setActiveId, loadingList, loadConversations, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, typingByConv, unreadByConv, toasts, dismissToast, markConversationRead }),
+    [conversations, messagesByConv, activeId, loadingList, loadConversations, loadHistory, sendMessage, typingByConv, unreadByConv, toasts, dismissToast, markConversationRead]
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

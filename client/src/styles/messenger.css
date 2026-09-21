@@ -240,6 +240,56 @@
 .reply-preview-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .reply-preview-body .quote { margin-bottom: 0; }
 
+/* Phase 10: unread badges + in-app toasts. */
+.conv { position: relative; }
+.unread-badge {
+  flex-shrink: 0;
+  align-self: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-grid;
+  place-items: center;
+}
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(340px, calc(100vw - 32px));
+}
+.toast {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  background: #0b0e1c;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.toast:hover { border-color: var(--accent); }
+.toast-title { font-size: 14px; }
+.toast-body {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .load-more { align-self: center; }
 .chat-error { margin: 8px 16px 0; }
 .sending-hint { margin: 4px 16px 0; }
