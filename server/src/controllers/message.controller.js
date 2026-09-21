@@ -1,5 +1,6 @@
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
+const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 
@@ -31,12 +32,15 @@ const send = asyncHandler(async (req, res) => {
   const conv = req.conversation;
   const receiverId = conv.participants.find((p) => String(p) !== String(req.userId));
 
+  const replyTo = await buildReplyQuote(conv._id, req.body.replyToMessageId);
+
   const message = await Message.create({
     conversationId: conv._id,
     senderId: req.userId,
     receiverId,
     content,
     messageType: 'text',
+    replyTo,
     status: 'sent',
   });
 
@@ -58,8 +62,44 @@ const send = asyncHandler(async (req, res) => {
 // Shared delivery fan-out: the SAME persisted doc goes to both users' rooms
 // (recipient delivery + sender multi-tab sync). Offline = no-op; reconnect
 // recovers via REST history. Never called before MongoDB persistence.
-function emitNewMessage(req, conv, message, senderId, receiverId) {
-  const persisted = message.toObject ? message.toObject() : message;
+
+// Phase 9D: builds the reply quote snapshot. Validates the parent exists and
+// belongs to THIS conversation (cross-conversation replies rejected).
+// Returns undefined when no reply requested (field stays absent).
+async function buildReplyQuote(conversationId, replyToMessageId) {
+  if (!replyToMessageId) return undefined;
+  const id = String(replyToMessageId);
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new AppError('Invalid reply reference.', 400);
+  }
+  const parent = await Message.findById(id).lean();
+  if (!parent) {
+    throw new AppError('Replied-to message not found.', 404);
+  }
+  if (String(parent.conversationId) !== String(conversationId)) {
+    throw new AppError('Reply must reference a message in this conversation.', 400);
+  }
+  const User = require('../models/User');
+  const sender = await User.findById(parent.senderId).select('name username').lean();
+  const quote = {
+    messageId: parent._id,
+    senderId: parent.senderId,
+    senderName: sender ? sender.name : 'Unknown',
+    messageType: parent.messageType,
+  };
+  if (parent.messageType === 'text') {
+    quote.excerpt = String(parent.content || '').slice(0, 120);
+  }
+  if (parent.messageType === 'image' && parent.image) {
+    quote.mediaUrl = parent.image.url;
+  }
+  if (parent.messageType === 'video' && parent.video) {
+    quote.mediaUrl = parent.video.thumbnail || parent.video.url;
+    if (parent.video.thumbnail) quote.thumbnail = parent.video.thumbnail;
+  }
+  return quote;
+}
+function emitNewMessage(req, conv, message, senderId, receiverId) {  const persisted = message.toObject ? message.toObject() : message;
   try {
     const io = req.app.get('io');
     if (io) {
@@ -108,6 +148,9 @@ const sendImage = asyncHandler(async (req, res) => {
   const conv = req.conversation;
   const receiverId = conv.participants.find((p) => String(p) !== String(req.userId));
 
+  // Phase 9D: validate reply BEFORE the Cloudinary upload (no orphan on bad replyTo).
+  const replyTo = await buildReplyQuote(conv._id, req.body.replyToMessageId);
+
   let uploaded;
   try {
     uploaded = await storage.uploadImageBuffer(req.file.buffer, req.file.originalname);
@@ -122,6 +165,7 @@ const sendImage = asyncHandler(async (req, res) => {
     senderId: req.userId,
     receiverId,
     messageType: 'image',
+    replyTo,
     image: {
       url: uploaded.secure_url,
       publicId: uploaded.public_id,
@@ -172,6 +216,9 @@ const sendVideo = asyncHandler(async (req, res) => {
   const conv = req.conversation;
   const receiverId = conv.participants.find((p) => String(p) !== String(req.userId));
 
+  // Phase 9D: validate reply BEFORE the Cloudinary upload (no orphan on bad replyTo).
+  const replyToVideo = await buildReplyQuote(conv._id, req.body.replyToMessageId);
+
   let uploaded;
   try {
     uploaded = await storage.uploadVideoBuffer(req.file.buffer, req.file.originalname);
@@ -188,6 +235,7 @@ const sendVideo = asyncHandler(async (req, res) => {
       senderId: req.userId,
       receiverId,
       messageType: 'video',
+      replyTo: replyToVideo,
       video: {
         url: uploaded.secure_url,
         publicId: uploaded.public_id,
@@ -252,6 +300,9 @@ const sendVoice = asyncHandler(async (req, res) => {
   const conv = req.conversation;
   const receiverId = conv.participants.find((p) => String(p) !== String(req.userId));
 
+  // Phase 9D: validate reply BEFORE the Cloudinary upload (no orphan on bad replyTo).
+  const replyToVoice = await buildReplyQuote(conv._id, req.body.replyToMessageId);
+
   // Client elapsed seconds (cross-check only); Cloudinary duration is authoritative.
   let clientSeconds;
   const rawDuration = Number(req.body && req.body.durationMs);
@@ -275,6 +326,7 @@ const sendVoice = asyncHandler(async (req, res) => {
       senderId: req.userId,
       receiverId,
       messageType: 'voice',
+      replyTo: replyToVoice,
       voice: {
         url: uploaded.secure_url,
         publicId: uploaded.public_id,

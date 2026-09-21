@@ -94,8 +94,8 @@ export function ChatProvider({ children }) {
 
   // Phase 9A: image send. Same dedupe/sidebar treatment as text;
   // the socket echo of the persisted doc merges by _id.
-  const sendImageMessage = useCallback(async (conversationId, file) => {
-    const data = await sendImageApi(conversationId, file);
+  const sendImageMessage = useCallback(async (conversationId, file, replyToMessageId) => {
+    const data = await sendImageApi(conversationId, file, replyToMessageId);
     const msg = data.message;
     setMessagesByConv((prev) => ({
       ...prev,
@@ -111,8 +111,8 @@ export function ChatProvider({ children }) {
 
   // Phase 9B: video send. Same dedupe/sidebar treatment as text/image;
   // the socket echo of the persisted doc merges by _id.
-  const sendVideoMessage = useCallback(async (conversationId, file, onProgress) => {
-    const data = await sendVideoApi(conversationId, file, onProgress);
+  const sendVideoMessage = useCallback(async (conversationId, file, onProgress, replyToMessageId) => {
+    const data = await sendVideoApi(conversationId, file, onProgress, replyToMessageId);
     const msg = data.message;
     setMessagesByConv((prev) => ({
       ...prev,
@@ -128,7 +128,7 @@ export function ChatProvider({ children }) {
 
   // Phase 9C: voice send. Same dedupe/sidebar treatment;
   // the socket echo of the persisted doc merges by _id.
-  const sendVoiceMessage = useCallback(async (conversationId, preview) => {
+  const sendVoiceMessage = useCallback(async (conversationId, preview, replyToMessageId) => {
     const base = String(preview.mimeType || '').split(';')[0].trim().toLowerCase();
     const ext = base.includes('mp4') ? 'mp4' : base.includes('ogg') ? 'ogg' : 'webm';
     const data = await sendVoiceApi(conversationId, {
@@ -136,7 +136,7 @@ export function ChatProvider({ children }) {
       filename: `voice-message.${ext}`,
       mimeType: preview.mimeType,
       durationMs: preview.durationMs,
-    });
+    }, replyToMessageId);
     const msg = data.message;
     setMessagesByConv((prev) => ({
       ...prev,
@@ -150,8 +150,8 @@ export function ChatProvider({ children }) {
     return msg;
   }, []);
 
-  const sendMessage = useCallback(async (conversationId, content) => {
-    const data = await sendMessageApi(conversationId, content);
+  const sendMessage = useCallback(async (conversationId, content, replyToMessageId) => {
+    const data = await sendMessageApi(conversationId, content, replyToMessageId);
     const msg = data.message;
     setMessagesByConv((prev) => ({
       ...prev,

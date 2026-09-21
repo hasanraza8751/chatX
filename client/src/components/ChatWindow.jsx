@@ -10,8 +10,7 @@ import { usePresence, resolvePresence } from '../context/PresenceContext.jsx';
 const PAGE_SIZE = 30;
 
 // "<name> is typing..." for the open conversation (other participants only).
-function TypingIndicator({ typingByConv, convId, participants }) {
-  const flags = typingByConv[String(convId)] || {};
+function TypingIndicator({ typingByConv, convId, participants }) {  const flags = typingByConv[String(convId)] || {};
   const ids = Object.keys(flags);
   if (ids.length === 0) return null;
   const names = ids.map((tid) => {
@@ -24,6 +23,36 @@ function TypingIndicator({ typingByConv, convId, participants }) {
       {text}
       <span className="typing-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
     </p>
+  );
+}
+
+// Phase 9D: quoted reply block. Renders from the denormalized snapshot
+// (senderName + excerpt/media refs travel on the message itself — no fetch).
+function quoteLabel(q) {
+  if (!q) return '';
+  if (q.messageType === 'image') return '📷 Photo';
+  if (q.messageType === 'video') return '🎬 Video';
+  if (q.messageType === 'voice') return '🎙️ Voice message';
+  return q.excerpt || '';
+}
+
+function QuoteBlock({ quote, onOpen }) {
+  if (!quote || !quote.messageId) return null;
+  const thumb = quote.thumbnail || (quote.messageType === 'image' ? quote.mediaUrl : null);
+  return (
+    <button
+      type="button"
+      className="quote"
+      onClick={onOpen}
+      aria-label={`Go to quoted message from ${quote.senderName || 'Unknown'}`}
+    >
+      <span className="quote-bar" aria-hidden="true" />
+      <span className="quote-body">
+        <strong className="quote-name">{quote.senderName || 'Unknown'}</strong>
+        <span className="quote-text">{quoteLabel(quote)}</span>
+      </span>
+      {thumb && <img className="quote-thumb" src={thumb} alt="" loading="lazy" />}
+    </button>
   );
 }
 
@@ -44,6 +73,72 @@ export default function ChatWindow() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [showJump, setShowJump] = useState(false);
+  // Phase 9D: reply target + open action menu + copy feedback.
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [menuFor, setMenuFor] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const senderNameFor = (m) =>
+    String(m.senderId) === String(user?._id)
+      ? user?.name || 'You'
+      : other.name || other.username || 'Unknown';
+  // Client-side quote shape (mirrors the server snapshot) for the reply preview bar.
+  const toQuote = (m) => ({
+    messageId: m._id,
+    senderId: m.senderId,
+    senderName: senderNameFor(m),
+    messageType: m.messageType,
+    excerpt:
+      m.messageType === 'text'
+        ? String(m.content || '').slice(0, 120)
+        : m.messageType === 'voice'
+          ? ''
+          : undefined,
+    mediaUrl:
+      m.messageType === 'image'
+        ? m.image?.url
+        : m.messageType === 'video'
+          ? m.video?.thumbnail || m.video?.url
+          : undefined,
+    thumbnail:
+      m.messageType === 'video'
+        ? m.video?.thumbnail
+        : m.messageType === 'image'
+          ? m.image?.url
+          : undefined,
+  });
+  const scrollToMessage = (mid) => {
+    const el = document.getElementById(`msg-${mid}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1200);
+  };
+  const copyText = async (m) => {
+    const text = String(m.content || '');
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for non-secure contexts / older browsers.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+      } catch {
+        /* ignore */
+      }
+      document.body.removeChild(ta);
+    }
+    setCopiedId(String(m._id));
+    setTimeout(() => setCopiedId((cur) => (cur === String(m._id) ? null : cur)), 1500);
+    setMenuFor(null);
+  };
+  const startReply = (m) => {
+    setReplyingTo(m);
+    setMenuFor(null);
+  };
   const stickRef = useRef(true);
   const threadRef = useRef(null);
   // Phase 9A/9B: attachments. Plain file inputs (no camera/gallery permissions),
@@ -100,8 +195,9 @@ export default function ChatWindow() {
     stickRef.current = true;
     stopTyping();
     try {
-      await sendImageMessage(id, attached.file);
+      await sendImageMessage(id, attached.file, replyingTo ? String(replyingTo._id) : undefined);
       clearAttachment();
+      setReplyingTo(null);
     } catch (err) {
       setError(err?.response?.data?.message || 'Image could not be sent.');
     } finally {
@@ -117,8 +213,9 @@ export default function ChatWindow() {
     stopTyping();
     try {
       // No duplicate sends while this upload is in flight (guard above + disabled UI).
-      await sendVideoMessage(id, attached.file, (pct) => setUploadProgress(pct));
+      await sendVideoMessage(id, attached.file, (pct) => setUploadProgress(pct), replyingTo ? String(replyingTo._id) : undefined);
       clearAttachment();
+      setReplyingTo(null);
     } catch (err) {
       setError(err?.response?.data?.message || 'Video could not be sent.');
     } finally {
@@ -288,9 +385,10 @@ export default function ChatWindow() {
     stickRef.current = true;
     stopTyping();
     try {
-      await sendVoiceMessage(id, voicePreview);
+      await sendVoiceMessage(id, voicePreview, replyingTo ? String(replyingTo._id) : undefined);
       if (voicePreview) URL.revokeObjectURL(voicePreview.blobUrl);
       setVoicePreview(null);
+      setReplyingTo(null);
     } catch (err) {
       // Keep the preview so the user can retry.
       setError(err?.response?.data?.message || 'Voice message could not be sent.');
@@ -353,6 +451,10 @@ export default function ChatWindow() {
     setHistoryError('');
     setLoading(true);
     stickRef.current = true;
+    // Phase 9D: a new conversation starts with no reply draft / open menu.
+    setReplyingTo(null);
+    setMenuFor(null);
+    setCopiedId(null);
     loadHistory(id, 1, PAGE_SIZE)
       .then((data) => setHasMore(!!data.hasMore))
       .catch((err) => setHistoryError(err?.response?.data?.message || 'Could not load messages.'))
@@ -406,6 +508,15 @@ export default function ChatWindow() {
     if (messages.length > 0) setLoading(false);
   }, [messages.length]);
 
+  // Phase 9D: Escape closes the open action menu.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMenuFor(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   const onScroll = () => {
     const el = threadRef.current;
     if (!el) return;
@@ -455,8 +566,9 @@ export default function ChatWindow() {
     stickRef.current = true;
     stopTyping(); // sent => no longer typing (server also clears on persist)
     try {
-      await sendMessage(id, content);
+      await sendMessage(id, content, replyingTo ? String(replyingTo._id) : undefined);
       setDraft('');
+      setReplyingTo(null);
       requestAnimationFrame(() => {
         const ta = document.querySelector('.composer textarea');
         if (ta) ta.style.height = 'auto';
@@ -520,8 +632,12 @@ export default function ChatWindow() {
             const isImage = m.messageType === 'image' && m.image && m.image.url;
             const isVideo = m.messageType === 'video' && m.video && m.video.url;
             const isVoice = m.messageType === 'voice' && m.voice && m.voice.url;
+            const menuOpen = menuFor === String(m._id);
             return (
-              <div key={m._id} className={mine ? 'bubble mine' : 'bubble theirs'}>
+              <div key={m._id} id={`msg-${m._id}`} className={mine ? 'bubble mine' : 'bubble theirs'}>
+                {m.replyTo && m.replyTo.messageId && (
+                  <QuoteBlock quote={m.replyTo} onOpen={() => scrollToMessage(m.replyTo.messageId)} />
+                )}
                 {isVoice ? (
                   <div className="voice-msg">
                     <audio className="msg-audio" src={m.voice.url} controls preload="metadata" />
@@ -558,6 +674,28 @@ export default function ChatWindow() {
                     </span>
                   )}
                 </div>
+                <button
+                  type="button"
+                  className="msg-menu-btn"
+                  aria-label="Message actions"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuFor((cur) => (cur === String(m._id) ? null : String(m._id)))}
+                >
+                  ⋯
+                </button>
+                {menuOpen && (
+                  <div className="msg-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => startReply(m)}>
+                      ↩ Reply
+                    </button>
+                    {m.messageType === 'text' && m.content && (
+                      <button type="button" role="menuitem" onClick={() => copyText(m)}>
+                        {copiedId === String(m._id) ? '✓ Copied' : '⧉ Copy text'}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })
@@ -571,6 +709,24 @@ export default function ChatWindow() {
         <p className="error chat-error" role="alert">{error}</p>
       )}
       {sending && <p className="hint sending-hint">Sending…</p>}
+      {replyingTo && (
+        <div className="reply-preview-bar">
+          <div className="reply-preview-body">
+            <span className="hint">
+              Replying to <strong>{senderNameFor(replyingTo)}</strong>
+            </span>
+            <QuoteBlock quote={toQuote(replyingTo)} onOpen={() => scrollToMessage(replyingTo._id)} />
+          </div>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => setReplyingTo(null)}
+            aria-label="Cancel reply"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {uploading && !voicePreview && (
         <p className="hint sending-hint" aria-live="polite">
           {attached && attached.kind === 'video'

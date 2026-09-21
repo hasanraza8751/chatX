@@ -24,6 +24,7 @@ router.post(
   '/',
   body('conversationId').notEmpty().withMessage('conversationId is required.').isMongoId().withMessage('Invalid conversation id.'),
   body('content').notEmpty().withMessage('Message content is required.').isLength({ max: 2000 }).withMessage('Message is too long (max 2000).'),
+  body('replyToMessageId').optional().isMongoId().withMessage('Invalid reply reference.'),
   validate,
   requireParticipant,
   send

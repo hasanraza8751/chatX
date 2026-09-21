@@ -148,6 +148,98 @@
 .bubble.theirs .meta { color: var(--muted); }
 .bubble-text { white-space: pre-wrap; }
 
+/* Phase 9D: per-message actions + reply quotes. */
+.bubble { position: relative; }
+.bubble.flash { animation: msgflash 1.2s; }
+@keyframes msgflash {
+  0%, 100% { filter: none; }
+  30% { filter: brightness(1.6); }
+}
+.msg-menu-btn {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+.bubble:hover .msg-menu-btn,
+.bubble:focus-within .msg-menu-btn,
+.msg-menu-btn[aria-expanded="true"] { opacity: 0.75; }
+@media (hover: none) {
+  .msg-menu-btn { opacity: 0.6; }
+}
+.msg-menu-btn:focus-visible { opacity: 1; outline: 2px solid var(--accent); }
+.msg-menu {
+  position: absolute;
+  top: 22px;
+  right: 4px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+  background: #0b0e1c;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.msg-menu button {
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 9px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+}
+.msg-menu button:hover { background: rgba(108, 123, 255, 0.16); }
+.quote {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.22);
+  border: none;
+  border-radius: 10px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.quote-bar { width: 3px; border-radius: 2px; background: var(--accent); flex-shrink: 0; }
+.quote-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.quote-name { font-size: 12px; color: #9db4ff; }
+.quote-text {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quote-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.reply-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #0b0e1c;
+}
+.reply-preview-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.reply-preview-body .quote { margin-bottom: 0; }
+
 .load-more { align-self: center; }
 .chat-error { margin: 8px 16px 0; }
 .sending-hint { margin: 4px 16px 0; }

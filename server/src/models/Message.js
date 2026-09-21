@@ -39,6 +39,17 @@ const messageSchema = new mongoose.Schema(
       duration: { type: Number }, // seconds (Cloudinary, else client elapsed)
     },
     status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
+    // Phase 9D: reply quote snapshot (denormalized so history/socket payloads
+    // carry the quote with zero extra queries; no deletion feature exists to stale it).
+    replyTo: {
+      messageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
+      senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      senderName: { type: String },
+      messageType: { type: String },
+      excerpt: { type: String },
+      mediaUrl: { type: String },
+      thumbnail: { type: String },
+    },
   },
   { timestamps: true }
 );
