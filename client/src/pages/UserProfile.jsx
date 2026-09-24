@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getUser } from '../api/users.js';
+import Avatar from '../components/Avatar.jsx';
 
-// Public profile: shows only safe fields returned by GET /api/users/:id.
+// Public profile: same safe fields from GET /api/users/:id, cleaner layout.
 export default function UserProfile() {
   const { id } = useParams();
   const [data, setData] = useState(null);
@@ -23,18 +24,30 @@ export default function UserProfile() {
   }, [id]);
 
   return (
-    <main className="page">
-      <h1>Profile</h1>
-      {error && <p className="error" role="alert">{error}</p>}
+    <main className="page narrow">
+      <div className="page-head">
+        <h1>Profile</h1>
+      </div>
+      {error && <p className="inline-error" role="alert">{error}</p>}
+      {!error && !data && (
+        <section className="card"><p className="hint">Loading profile…</p></section>
+      )}
       {data && (
         <section className="card">
-          <p><strong>{data.name}</strong> <span className="hint">@{data.username}</span></p>
-          <p>{data.bio || 'No bio yet.'}</p>
-          <p className="hint">{data.isOnline ? '● Online' : 'Offline'}</p>
-          <p className="hint">Start Chat arrives in Phase 4 (no messaging yet).</p>
+          <div className="profile-hero">
+            <Avatar name={data.name} size={64} />
+            <div className="who">
+              <strong>{data.name}</strong>
+              <div className="meta">@{data.username}</div>
+              <div className="status-line">
+                {data.isOnline ? (<><span className="status-dot on" />Online</>) : (<><span className="status-dot off" />Offline</>)}
+              </div>
+            </div>
+          </div>
+          <p className="bio-text">{data.bio || 'No bio yet.'}</p>
         </section>
       )}
-      <p><Link to="/search">← Search</Link> · <Link to="/dashboard">Dashboard</Link></p>
+      <p className="crumbs"><Link to="/search">← Search</Link> · <Link to="/dashboard">Dashboard</Link></p>
     </main>
   );
 }

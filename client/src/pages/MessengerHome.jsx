@@ -1,16 +1,15 @@
 import { Link } from 'react-router-dom';
+import { ChatIcon } from '../components/icons.jsx';
 
 // Shown on desktop when no conversation is selected,
 // and never on mobile detail view (router shows the chat instead).
 export default function MessengerHome() {
   return (
     <div className="empty-chat">
-      <div className="logo">CX</div>
+      <div className="empty-art" aria-hidden="true"><ChatIcon /></div>
       <h2>Select a conversation</h2>
-      <p className="hint">Pick a chat on the left, or search above to start a new one.</p>
-      <p>
-        <Link className="btn" to="/search">Find people</Link>
-      </p>
+      <p className="hint">Choose a person from the sidebar to start chatting.</p>
+      <Link className="btn" to="/search">Find people</Link>
     </div>
   );
 }

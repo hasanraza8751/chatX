@@ -4,8 +4,10 @@ import { searchUsers } from '../api/users.js';
 import { createConversation } from '../api/conversations.js';
 import { useDebounce } from '../hooks/useDebounce.js';
 import Avatar from './Avatar.jsx';
+import { SearchIcon } from './icons.jsx';
 
 // Sidebar-integrated find-and-start-chat (debounced user search + create/get conversation).
+// Same API logic — refined instant-search presentation only.
 export default function NewChatSearch() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -59,13 +61,17 @@ export default function NewChatSearch() {
 
   return (
     <div className="newchat">
-      <input
-        className="search-input"
-        placeholder="Search people to chat…"
-        aria-label="Search people to chat"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+      <div className="search-wrap">
+        <SearchIcon />
+        <input
+          className="search-input"
+          placeholder="Search people…"
+          aria-label="Search people to chat"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
       {busy && <p className="hint">Searching…</p>}
       {error && (
         <p className="error" role="alert">{error}</p>
@@ -77,7 +83,7 @@ export default function NewChatSearch() {
         <ul className="newchat-results">
           {results.map((u) => (
             <li key={u._id}>
-              <Avatar name={u.name} size={32} />
+              <Avatar name={u.name} size={34} />
               <span className="newchat-meta">
                 <strong>{u.name}</strong>
                 <span className="hint">@{u.username}</span>

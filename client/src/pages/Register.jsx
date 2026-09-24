@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
+// Same registration logic — minimal premium layout only.
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
@@ -30,18 +31,42 @@ export default function Register() {
   };
 
   return (
-    <main className="page">
-      <h1>Create account</h1>
-      <form className="card form" onSubmit={onSubmit}>
-        <label>Name<input name="name" value={form.name} onChange={onChange} required maxLength={50} /></label>
-        <label>Username<input name="username" value={form.username} onChange={onChange} required minLength={3} maxLength={20} /></label>
-        <label>Email<input name="email" type="email" value={form.email} onChange={onChange} required /></label>
-        <label>Password<input name="password" type="password" value={form.password} onChange={onChange} required minLength={8} /></label>
-        <label>Confirm password<input name="confirm" type="password" value={form.confirm} onChange={onChange} required /></label>
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Register'}</button>
-      </form>
-      <p><Link to="/login">Have an account? Login</Link> · <Link to="/">← Home</Link></p>
+    <main className="auth-page">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <span className="logo">CX</span>
+          <strong>ChatX</strong>
+        </div>
+        <h1>Create your account</h1>
+        <p className="auth-sub">Start messaging in seconds.</p>
+        <form className="form" onSubmit={onSubmit}>
+          <label className="field">
+            <span>Name</span>
+            <input name="name" value={form.name} onChange={onChange} autoComplete="name" placeholder="Your name" required maxLength={50} />
+          </label>
+          <label className="field">
+            <span>Username</span>
+            <input name="username" value={form.username} onChange={onChange} autoComplete="username" placeholder="username" required minLength={3} maxLength={20} />
+          </label>
+          <label className="field">
+            <span>Email</span>
+            <input name="email" type="email" value={form.email} onChange={onChange} autoComplete="email" placeholder="you@example.com" required />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input name="password" type="password" value={form.password} onChange={onChange} autoComplete="new-password" placeholder="Min. 8 characters" required minLength={8} />
+          </label>
+          <label className="field">
+            <span>Confirm password</span>
+            <input name="confirm" type="password" value={form.confirm} onChange={onChange} autoComplete="new-password" placeholder="Repeat password" required />
+          </label>
+          {error && <p className="inline-error" role="alert">{error}</p>}
+          <button className="btn primary block" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
+        </form>
+        <p className="auth-foot">
+          Have an account? <Link to="/login">Log in</Link>
+        </p>
+      </div>
     </main>
   );
 }

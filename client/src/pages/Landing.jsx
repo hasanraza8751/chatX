@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/client.js';
 
-// Phase 1 landing: proves frontend -> backend wiring via /api/health.
-// Later this becomes the marketing page from PRD 7.1.
+// Landing: same /api/health wiring, calmer premium presentation.
 export default function Landing() {
   const [health, setHealth] = useState({ state: 'checking' });
 
@@ -28,41 +27,29 @@ export default function Landing() {
   }, []);
 
   return (
-    <main className="page">
+    <main className="page narrow">
       <header className="brand">
         <div className="logo">CX</div>
         <div>
           <h1>ChatX</h1>
-          <p>Real-time messaging — Phase 1 setup</p>
+          <p>Real-time messaging, minus the noise.</p>
         </div>
       </header>
 
       <section className="card">
-        <h2>Backend status</h2>
-        {health.state === 'checking' && <p>Checking backend status…</p>}
-        {health.state === 'ok' && (
-          <p className="ok">
-            Connected — {health.data.service} ({health.data.env}) at {health.data.time}
-          </p>
-        )}
-        {health.state === 'error' && (
-          <p className="error">
-            Backend not reachable: {health.message}. Start it with <code>npm run dev</code> in{' '}
-            <code>server/</code>.
-          </p>
-        )}
+        <div className="status-line" role="status">
+          {health.state === 'checking' && (<><span className="status-dot mid" />Checking connection…</>)}
+          {health.state === 'ok' && (<><span className="status-dot on" />Connected · {health.data.service} ({health.data.env})</>)}
+          {health.state === 'error' && (<><span className="status-dot off" />Backend unreachable: {health.message}</>)}
+        </div>
       </section>
 
       <nav className="actions">
-        <Link className="btn primary" to="/register">
-          Get Started
-        </Link>
-        <Link className="btn" to="/login">
-          Login
-        </Link>
+        <Link className="btn primary" to="/register">Get started</Link>
+        <Link className="btn" to="/login">Log in</Link>
       </nav>
 
-      <p className="hint">Auth + chat screens land in Phases 2–5. This page only verifies wiring.</p>
+      <p className="hint">Fast, private conversations with the people who matter.</p>
     </main>
   );
 }

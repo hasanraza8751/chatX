@@ -4,6 +4,7 @@ import { useChat } from '../context/ChatContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useSocket } from '../context/SocketContext.jsx';
 import Avatar from './Avatar.jsx';
+import { BackIcon, ClipIcon, MicIcon, VideoIcon, SendIcon, ReplyIcon, CopyIcon, CheckIcon, CloseIcon, ChevronDownIcon } from './icons.jsx';
 import { formatClock, formatLastSeen } from '../utils/formatTime.js';
 import { ensureNotificationPermission } from '../utils/notifications.js';
 import { usePresence, resolvePresence } from '../context/PresenceContext.jsx';
@@ -444,6 +445,13 @@ export default function ChatWindow() {
   const messages = messagesByConv[id] || [];
   const presence = resolvePresence(live, other);
   const presenceText = presence.online ? 'Online' : formatLastSeen(presence.lastSeen);
+  // Presentation-only: remembers which message ids have already been painted,
+  // so the entrance animation plays ONLY for genuinely new arrivals — never
+  // for history loads, pagination, or conversation switches. No logic change.
+  const seenRef = useRef(null);
+  if (!seenRef.current || seenRef.current.convId !== String(id)) {
+    seenRef.current = { convId: String(id), ids: new Set(messages.map((m) => String(m._id))) };
+  }
 
   useEffect(() => {
     setActiveId(id);
@@ -546,6 +554,9 @@ export default function ChatWindow() {
     setLoadingMore(true);
     try {
       const data = await loadHistory(id, page + 1, PAGE_SIZE);
+      // Paginated history must not replay the entrance animation: pre-mark
+      // the fetched ids before the re-render paints (same microtask).
+      (data.messages || []).forEach((m) => seenRef.current.ids.add(String(m._id)));
       setPage((p) => p + 1);
       setHasMore(!!data.hasMore);
       requestAnimationFrame(() => {
@@ -599,8 +610,8 @@ export default function ChatWindow() {
   return (
     <div className="chatpane">
       <header className="chat-head">
-        <Link to="/messages" className="btn small back-btn" aria-label="Back to chats">←</Link>
-        <Avatar name={other.name || '?'} size={36} />
+        <Link to="/messages" className="icon-btn back-btn" aria-label="Back to chats"><BackIcon /></Link>
+        <Avatar name={other.name || '?'} size={40} />
         <div className="chat-identity">
           <strong>{other.name || 'Conversation'}</strong>
           <span className="hint">
@@ -612,7 +623,7 @@ export default function ChatWindow() {
       </header>
 
       {historyError && (
-        <p className="error chat-error" role="alert">
+        <p className="inline-error chat-error" role="alert">
           {historyError}{' '}
           <button className="btn small" onClick={() => window.location.reload()}>Retry</button>
         </p>
@@ -631,10 +642,18 @@ export default function ChatWindow() {
             ))}
           </div>
         ) : messages.length === 0 ? (
-          <p className="hint thread-empty">No messages yet. Say hello.</p>
+          <div className="thread-empty">
+            <p><strong>No messages yet</strong></p>
+            <p className="hint">Say hello to start the conversation.</p>
+          </div>
         ) : (
           messages.map((m) => {
             const mine = String(m.senderId) === String(user?._id);
+            // Fresh = never painted before → gets the entrance animation.
+            const mid = String(m._id);
+            const isFresh = !seenRef.current.ids.has(mid);
+            if (isFresh) seenRef.current.ids.add(mid);
+            const enterCls = isFresh ? (mine ? ' msg-enter msg-out' : ' msg-enter msg-in') : '';
             // Ticks: sent → ✓, delivered → ✓✓, read → ✓✓ highlighted (distinct read state).
             const tick = m.status === 'read' || m.status === 'delivered' ? '✓✓' : '✓';
             const tickTitle = m.status === 'read' ? 'Read' : m.status === 'delivered' ? 'Delivered' : 'Sent';
@@ -643,7 +662,7 @@ export default function ChatWindow() {
             const isVoice = m.messageType === 'voice' && m.voice && m.voice.url;
             const menuOpen = menuFor === String(m._id);
             return (
-              <div key={m._id} id={`msg-${m._id}`} className={mine ? 'bubble mine' : 'bubble theirs'}>
+              <div key={m._id} id={`msg-${m._id}`} className={mine ? `bubble mine${enterCls}` : `bubble theirs${enterCls}`}>
                 {m.replyTo && m.replyTo.messageId && (
                   <QuoteBlock quote={m.replyTo} onOpen={() => scrollToMessage(m.replyTo.messageId)} />
                 )}
@@ -678,7 +697,7 @@ export default function ChatWindow() {
                 <div className="meta">
                   {formatClock(m.createdAt)}
                   {mine && (
-                    <span className={m.status === 'read' ? 'tick read' : 'tick'} title={tickTitle}>
+                    <span key={m.status || 'sent'} className={m.status === 'read' ? 'tick read tick-pop' : 'tick tick-pop'} title={tickTitle}>
                       {' '}{tick}
                     </span>
                   )}
@@ -696,11 +715,11 @@ export default function ChatWindow() {
                 {menuOpen && (
                   <div className="msg-menu" role="menu">
                     <button type="button" role="menuitem" onClick={() => startReply(m)}>
-                      ↩ Reply
+                      <ReplyIcon />Reply
                     </button>
                     {m.messageType === 'text' && m.content && (
                       <button type="button" role="menuitem" onClick={() => copyText(m)}>
-                        {copiedId === String(m._id) ? '✓ Copied' : '⧉ Copy text'}
+                        {copiedId === String(m._id) ? (<><CheckIcon />Copied</>) : (<><CopyIcon />Copy text</>)}
                       </button>
                     )}
                   </div>
@@ -712,10 +731,10 @@ export default function ChatWindow() {
       </div>
 
       {showJump && (
-        <button className="jump-latest" onClick={jumpToLatest}>↓ New messages</button>
+        <button className="jump-latest" onClick={jumpToLatest}><ChevronDownIcon />New messages</button>
       )}
       {error && (
-        <p className="error chat-error" role="alert">{error}</p>
+        <p className="inline-error chat-error" role="alert">{error}</p>
       )}
       {sending && <p className="hint sending-hint">Sending…</p>}
       {replyingTo && (
@@ -728,11 +747,11 @@ export default function ChatWindow() {
           </div>
           <button
             type="button"
-            className="btn small"
+            className="icon-btn"
             onClick={() => setReplyingTo(null)}
             aria-label="Cancel reply"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
       )}
@@ -780,7 +799,7 @@ export default function ChatWindow() {
       {recording && (
         <div className="rec-bar" role="status" aria-live="polite">
           <span className="rec-dot" aria-hidden="true" />
-          <span>🎙️ Recording {formatElapsed(recElapsed)}</span>
+          <span>Recording {formatElapsed(recElapsed)}</span>
           <button className="btn small primary" onClick={() => stopRecording(false)} disabled={uploading}>
             Stop
           </button>
@@ -793,7 +812,7 @@ export default function ChatWindow() {
         <div className="preview-bar">
           <audio className="preview-audio" src={voicePreview.blobUrl} controls preload="metadata" />
           <div className="preview-actions">
-            <span className="hint preview-meta">🎙️ {formatElapsed(voicePreview.durationMs)}</span>
+            <span className="hint preview-meta">Voice · {formatElapsed(voicePreview.durationMs)}</span>
             <button className="btn small primary" onClick={onSendVoice} disabled={uploading}>
               {uploading ? '…' : 'Send voice'}
             </button>
@@ -824,47 +843,47 @@ export default function ChatWindow() {
         />
         <button
           type="button"
-          className="btn attach-btn"
+          className="icon-btn attach-btn"
           onClick={() => fileRef.current && fileRef.current.click()}
           aria-label="Attach an image"
           title="Attach an image"
           disabled={recording || uploading || !!voicePreview}
         >
-          📎
+          <ClipIcon />
         </button>
         <button
           type="button"
-          className="btn attach-btn"
+          className="icon-btn attach-btn"
           onClick={() => videoRef.current && videoRef.current.click()}
           aria-label="Attach a video"
           title="Attach a video"
           disabled={recording || uploading || !!voicePreview}
         >
-          🎬
+          <VideoIcon />
         </button>
         <button
           type="button"
-          className="btn attach-btn"
+          className="icon-btn attach-btn"
           onClick={startRecording}
           aria-label="Record a voice message"
           title="Record a voice message"
           disabled={recording || uploading || !!voicePreview || !!attached}
         >
-          🎙️
+          <MicIcon />
         </button>
         <textarea
           value={draft}
           onChange={onDraftChange}
           onInput={autoGrow}
           onKeyDown={onKeyDown}
-          placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+          placeholder="Type a message…"
           aria-label="Type a message"
           maxLength={2000}
           rows={1}
           disabled={recording}
         />
-        <button className="btn primary" disabled={sending || recording || !draft.trim()}>
-          {sending ? '…' : 'Send'}
+        <button className="send-btn" aria-label="Send message" disabled={sending || recording || !draft.trim()}>
+          <SendIcon />
         </button>
       </form>
     </div>

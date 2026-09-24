@@ -40,8 +40,8 @@ export default function ConversationList({ conversations, activeId, myId, loadin
   if (conversations.length === 0) {
     return (
       <div className="side-state">
-        <p>No conversations yet.</p>
-        <p className="hint">Search above to start your first chat.</p>
+        <strong>No conversations yet</strong>
+        <p className="hint">Find someone and start your first conversation.</p>
       </div>
     );
   }
@@ -84,7 +84,7 @@ export default function ConversationList({ conversations, activeId, myId, loadin
                 </span>
               </span>
               {unread > 0 && (
-                <span className="unread-badge" aria-label={`${unread} unread messages`}>
+                <span key={unread} className="unread-badge" aria-label={`${unread} unread messages`}>
                   {unread > 99 ? '99+' : unread}
                 </span>
               )}
