@@ -2,7 +2,7 @@ const express = require('express');
 const { body } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireParticipant = require('../middleware/requireParticipant');
-const { create, list, getById } = require('../controllers/conversation.controller');
+const { create, list, getById, setLanguageOverride } = require('../controllers/conversation.controller');
 
 const router = express.Router();
 router.use(auth);
@@ -22,5 +22,6 @@ router.post(
 );
 router.get('/', list);
 router.get('/:id', requireParticipant, getById);
+router.patch('/:id/language', requireParticipant, setLanguageOverride);
 
 module.exports = router;

@@ -3,9 +3,16 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 
-// Public projection — NEVER email, passwordHash, or precise lastSeen.
-// Matches approved architecture: _id, name, username, avatar, bio, isOnline (+ createdAt for profiles).
+// Public projection — NEVER email, passwordHash, precise lastSeen,
+// or translation preferences.
 const PUBLIC_FIELDS = '_id name username avatar bio isOnline createdAt';
+
+// Own-profile projection: PUBLIC_FIELDS + email + translation preferences
+// (used by PATCH /profile so the client can merge its own settings).
+const OWN_FIELDS = `${PUBLIC_FIELDS} email preferredLanguage translationMode translationTarget`;
+
+const LANGS = ['en', 'hi', 'bn', 'ta'];
+const MODES = ['off', 'ask', 'auto'];
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -46,7 +53,7 @@ const getUserById = asyncHandler(async (req, res) => {
 });
 
 // PATCH /api/users/profile — auth required. Own profile only (req.userId).
-// Whitelist: name + bio only. Avatar stays placeholder (no uploads in Phase 3).
+// Whitelist: name + bio + translation preferences. Avatar stays placeholder.
 const updateMyProfile = asyncHandler(async (req, res) => {
   const updates = {};
   if (req.body.name !== undefined) {
@@ -60,13 +67,31 @@ const updateMyProfile = asyncHandler(async (req, res) => {
     if (bio.length > 200) throw new AppError('Bio is too long (max 200).', 400);
     updates.bio = bio;
   }
+  if (req.body.preferredLanguage !== undefined) {
+    if (!LANGS.includes(req.body.preferredLanguage)) {
+      throw new AppError('Unsupported language. Use en, hi, bn or ta.', 400);
+    }
+    updates.preferredLanguage = req.body.preferredLanguage;
+  }
+  if (req.body.translationMode !== undefined) {
+    if (!MODES.includes(req.body.translationMode)) {
+      throw new AppError('Invalid translation mode. Use off, ask or auto.', 400);
+    }
+    updates.translationMode = req.body.translationMode;
+  }
+  if (req.body.translationTarget !== undefined) {
+    if (req.body.translationTarget !== null && !LANGS.includes(req.body.translationTarget)) {
+      throw new AppError('Unsupported target language. Use en, hi, bn or ta.', 400);
+    }
+    updates.translationTarget = req.body.translationTarget;
+  }
   if (Object.keys(updates).length === 0) {
-    throw new AppError('Nothing to update. Provide name and/or bio.', 400);
+    throw new AppError('Nothing to update. Provide name, bio, or language settings.', 400);
   }
   const user = await User.findByIdAndUpdate(req.userId, updates, {
     new: true,
     runValidators: true,
-  }).select(PUBLIC_FIELDS).lean();
+  }).select(OWN_FIELDS).lean();
   if (!user) {
     throw new AppError('Not authorized. Please log in.', 401);
   }

@@ -214,6 +214,49 @@ code { background: var(--inset); padding: 2px 7px; border-radius: 6px; font-size
   outline: none;
   box-shadow: var(--neu-in), 0 0 0 3px var(--accent-wash);
 }
+.form select {
+  padding: 10px 13px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: var(--inset);
+  box-shadow: var(--neu-in);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  width: 100%;
+  cursor: pointer;
+}
+.form select:focus {
+  border-color: rgba(255, 79, 94, 0.45);
+  outline: none;
+  box-shadow: var(--neu-in), 0 0 0 3px var(--accent-wash);
+}
+/* Translation mode radios + supported language list (Profile settings). */
+.radio-col { display: grid; gap: 8px; }
+.radio-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: var(--inset);
+  box-shadow: var(--neu-in);
+  font-size: 14px;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+.radio-row:hover { box-shadow: var(--neu-in), 0 0 0 2px var(--accent-wash); }
+.radio-row input[type="radio"] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.radio-row span { color: var(--text-soft); }
+.lang-list { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; }
+.lang-list li {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--inset);
+  box-shadow: var(--neu-in);
+  color: var(--muted);
+  font-size: 12.5px;
+}
 
 .search-input {
   width: 100%;

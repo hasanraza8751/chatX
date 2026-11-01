@@ -24,3 +24,5 @@ export const CopyIcon = (p) => base(p, <g><rect x="9" y="9" width="12" height="1
 export const ReplyIcon = (p) => base(p, <g><path d="M9 17 4 12l5-5" /><path d="M4 12h9a7 7 0 0 1 7 7v1" /></g>);
 export const CheckIcon = (p) => base(p, <path d="m4.5 12.5 5 5 10-11" />);
 export const ChevronDownIcon = (p) => base(p, <g><path d="m6 9 6 6 6-6" /></g>);
+export const TranslateIcon = (p) => base(p, <g><path d="M4 5.5h9M8.5 3.5v2c0 3.2-2.1 5.9-5 7.5M5.8 9.5c1.1 2.6 3.3 4.7 6.2 5.7" /><path d="m12.5 20.5 4.3-9.5 4.2 9.5M14.1 17h5.3" /></g>);
+export const GlobeIcon = (p) => base(p, <g><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.3 2.3 3.5 5.2 3.5 8.5s-1.2 6.2-3.5 8.5c-2.3-2.3-3.5-5.2-3.5-8.5s1.2-6.2 3.5-8.5Z" /></g>);

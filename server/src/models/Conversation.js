@@ -15,6 +15,18 @@ const conversationSchema = new mongoose.Schema(
     pairKey: { type: String, required: true, unique: true },
     lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
     lastMessageAt: { type: Date, default: null },
+    // Per-conversation translation target overrides (isolated, optional).
+    // Each entry lets ONE participant override their global language preference
+    // for THIS conversation only. Absent entry => global preference applies.
+    languageOverrides: {
+      type: [
+        {
+          userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+          targetLanguage: { type: String, enum: ['en', 'hi', 'bn', 'ta'], required: true },
+        },
+      ],
+      default: undefined,
+    },
   },
   { timestamps: true }
 );

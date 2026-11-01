@@ -1,4 +1,5 @@
 const asyncHandler = require('../utils/asyncHandler');
+const AppError = require('../utils/AppError');
 const { findOrCreateOneToOne, listForUser, PUBLIC_USER_FIELDS } = require('../services/conversation.service');
 
 // POST /api/conversations { userId } — get-or-create 1-to-1 (200 existing, 201 created).
@@ -19,4 +20,25 @@ const getById = asyncHandler(async (req, res) => {
   res.json({ conversation: conv });
 });
 
-module.exports = { create, list, getById };
+// PATCH /api/conversations/:id/language { targetLanguage: 'en'|..|null }
+// Participant only (requireParticipant ran first). Sets or clears MY
+// per-conversation translation target override. Global preference applies
+// when no override exists. Small additive endpoint for the translation feature.
+const setLanguageOverride = asyncHandler(async (req, res) => {
+  const LANGS = ['en', 'hi', 'bn', 'ta'];
+  const { targetLanguage } = req.body || {};
+  if (targetLanguage !== null && targetLanguage !== undefined && !LANGS.includes(targetLanguage)) {
+    throw new AppError('Unsupported target language. Use en, hi, bn, ta or null.', 400);
+  }
+  const conv = req.conversation;
+  conv.languageOverrides = (conv.languageOverrides || []).filter(
+    (o) => String(o.userId) !== String(req.userId)
+  );
+  if (targetLanguage) {
+    conv.languageOverrides.push({ userId: req.userId, targetLanguage });
+  }
+  await conv.save();
+  res.json({ conversationId: String(conv._id), languageOverrides: conv.languageOverrides || [] });
+});
+
+module.exports = { create, list, getById, setLanguageOverride };

@@ -28,6 +28,13 @@ const userSchema = new mongoose.Schema(
     bio: { type: String, default: '', maxlength: 200 },
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: null },
+    // Translation preferences (isolated feature; defaults keep old behavior).
+    // preferredLanguage: recipient language used as the default translation target.
+    // translationMode: 'off' | 'ask' | 'auto'. translationTarget overrides the
+    // target when set, otherwise preferredLanguage is used.
+    preferredLanguage: { type: String, enum: ['en', 'hi', 'bn', 'ta'], default: 'en' },
+    translationMode: { type: String, enum: ['off', 'ask', 'auto'], default: 'off' },
+    translationTarget: { type: String, enum: ['en', 'hi', 'bn', 'ta'], default: null },
   },
   { timestamps: true }
 );
@@ -37,7 +44,7 @@ userSchema.index({ username: 1 }, { unique: true });
 userSchema.index({ email: 1 }, { unique: true });
 
 // Safe projection: ONLY these fields ever leave the backend.
-userSchema.statics.safeFields = '_id name username email avatar bio isOnline lastSeen createdAt updatedAt';
+userSchema.statics.safeFields = '_id name username email avatar bio isOnline lastSeen preferredLanguage translationMode translationTarget createdAt updatedAt';
 userSchema.methods.toSafeJSON = function () {
   return {
     _id: this._id,
@@ -48,6 +55,9 @@ userSchema.methods.toSafeJSON = function () {
     bio: this.bio,
     isOnline: this.isOnline,
     lastSeen: this.lastSeen,
+    preferredLanguage: this.preferredLanguage || 'en',
+    translationMode: this.translationMode || 'off',
+    translationTarget: this.translationTarget || null,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
   };

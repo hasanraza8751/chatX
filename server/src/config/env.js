@@ -17,6 +17,14 @@ const env = {
   JWT_SECRET: required('JWT_SECRET', null),
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
   CLIENT_URL: required('CLIENT_URL', 'http://localhost:5173'),
+  // Translation (optional — feature degrades gracefully without them).
+  // TRANSLATION_PROVIDER: auto|google|mymemory|phrasebook (default auto).
+  // GOOGLE_TRANSLATE_API_KEY: server-only secret, enables the Google provider.
+  // Without a key the chain falls back to MyMemory free tier, then the
+  // offline conversational phrasebook. Deliberately NOT prod-required so
+  // existing deployments keep booting.
+  TRANSLATION_PROVIDER: process.env.TRANSLATION_PROVIDER || 'auto',
+  GOOGLE_TRANSLATE_API_KEY: process.env.GOOGLE_TRANSLATE_API_KEY || '',
   isProd: (process.env.NODE_ENV || 'development') === 'production',
 };
 

@@ -4,7 +4,11 @@ import { useChat } from '../context/ChatContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useSocket } from '../context/SocketContext.jsx';
 import Avatar from './Avatar.jsx';
-import { BackIcon, ClipIcon, MicIcon, VideoIcon, SendIcon, ReplyIcon, CopyIcon, CheckIcon, CloseIcon, ChevronDownIcon } from './icons.jsx';
+import { BackIcon, ClipIcon, MicIcon, VideoIcon, SendIcon, ReplyIcon, CopyIcon, CheckIcon, CloseIcon, ChevronDownIcon, TranslateIcon, GlobeIcon } from './icons.jsx';
+import MessageTranslation from './MessageTranslation.jsx';
+import { useMessageTranslation } from '../hooks/useMessageTranslation.js';
+import { resolveTarget, translationMode, languageName, LANGUAGES } from '../utils/languages.js';
+import { setConversationLanguage } from '../api/conversations.js';
 import { formatClock, formatLastSeen } from '../utils/formatTime.js';
 import { ensureNotificationPermission } from '../utils/notifications.js';
 import { usePresence, resolvePresence } from '../context/PresenceContext.jsx';
@@ -65,7 +69,7 @@ export default function ChatWindow() {
   const { user } = useAuth();
   const { socket, connected } = useSocket();
   const { live } = usePresence();
-  const { conversations, messagesByConv, loadHistory, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, setActiveId, typingByConv, markConversationRead } = useChat();
+  const { conversations, messagesByConv, loadHistory, loadConversations, sendMessage, sendImageMessage, sendVideoMessage, sendVoiceMessage, setActiveId, typingByConv, markConversationRead } = useChat();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [historyError, setHistoryError] = useState('');
@@ -452,6 +456,36 @@ export default function ChatWindow() {
   if (!seenRef.current || seenRef.current.convId !== String(id)) {
     seenRef.current = { convId: String(id), ids: new Set(messages.map((m) => String(m._id))) };
   }
+  // Translation (isolated feature): recipient-side target + mode come from my
+  // profile, with an optional per-conversation override. Originals never change;
+  // requests are async and never block socket delivery or rendering.
+  const trTarget = resolveTarget(user, conv);
+  const trMode = translationMode(user);
+  const tr = useMessageTranslation(id, trTarget);
+  const convOverride = (conv?.languageOverrides || []).find((o) => String(o.userId) === String(user?._id))?.targetLanguage || '';
+  // Auto mode: translate genuinely new incoming messages in the background.
+  // Primitive deps (count + last id) retrigger only when arrivals change the
+  // thread; flushAuto no-ops when the queue is empty. Message lookup goes
+  // through a render-derived ref map so the effect needs no array dep.
+  const msgCount = messages.length;
+  const lastMsgId = msgCount > 0 ? String(messages[msgCount - 1]._id) : '';
+  const messagesRef = useRef({});
+  messagesRef.current = {};
+  messages.forEach((m) => { messagesRef.current[String(m._id)] = m; });
+  const flushAuto = tr.flushAuto;
+  useEffect(() => {
+    if (trMode !== 'auto') return;
+    flushAuto(messagesRef.current, trTarget);
+  }, [msgCount, lastMsgId, trMode, trTarget, flushAuto]);
+  const onConvLang = async (e) => {
+    const v = e.target.value || null;
+    try {
+      await setConversationLanguage(id, v);
+      await loadConversations();
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Could not update chat language.');
+    }
+  };
 
   useEffect(() => {
     setActiveId(id);
@@ -620,6 +654,17 @@ export default function ChatWindow() {
             {!connected && ' · reconnecting…'}
           </span>
         </div>
+        {/* Per-chat translation target (existing override API). Always visible;
+            the global mode only controls automatic behavior, never manual access. */}
+        <label className="tr-conv-wrap" title="Translation language for this chat">
+          <GlobeIcon />
+          <select className="tr-conv-select" value={convOverride} onChange={onConvLang} aria-label="Translation language for this chat">
+            <option value="">Global ({languageName(user?.preferredLanguage) || 'English'})</option>
+            {Object.entries(LANGUAGES).map(([code, label]) => (
+              <option key={code} value={code}>{label}</option>
+            ))}
+          </select>
+        </label>
       </header>
 
       {historyError && (
@@ -654,6 +699,11 @@ export default function ChatWindow() {
             const isFresh = !seenRef.current.ids.has(mid);
             if (isFresh) seenRef.current.ids.add(mid);
             const enterCls = isFresh ? (mine ? ' msg-enter msg-out' : ' msg-enter msg-in') : '';
+            // Auto mode: queue genuinely NEW incoming text messages for
+            // background translation (flushed from an effect; never blocks render).
+            if (isFresh && !mine && trMode === 'auto' && m.messageType === 'text' && m.content) {
+              tr.queueAuto(m);
+            }
             // Ticks: sent → ✓, delivered → ✓✓, read → ✓✓ highlighted (distinct read state).
             const tick = m.status === 'read' || m.status === 'delivered' ? '✓✓' : '✓';
             const tickTitle = m.status === 'read' ? 'Read' : m.status === 'delivered' ? 'Delivered' : 'Sent';
@@ -694,6 +744,19 @@ export default function ChatWindow() {
                 ) : (
                   <div className="bubble-text">{m.content}</div>
                 )}
+                {/* Manual Translate is always available (any mode, incl. OFF).
+                    ASK mode shows a prompt on fresh incoming messages; AUTO
+                    translates them in the background. Originals never change. */}
+                {m.messageType === 'text' && m.content && (
+                  <MessageTranslation
+                    state={tr.states[mid]}
+                    target={trTarget}
+                    variant={trMode === 'ask' && isFresh && !mine ? 'ask-prompt' : undefined}
+                    onTranslate={() => { tr.request(m, trTarget); setMenuFor(null); }}
+                    onToggle={() => tr.toggle(mid)}
+                    onRetry={() => tr.retry(m, trTarget)}
+                  />
+                )}
                 <div className="meta">
                   {formatClock(m.createdAt)}
                   {mine && (
@@ -717,6 +780,11 @@ export default function ChatWindow() {
                     <button type="button" role="menuitem" onClick={() => startReply(m)}>
                       <ReplyIcon />Reply
                     </button>
+                    {m.messageType === 'text' && m.content && tr.states[mid]?.status !== 'done' && tr.states[mid]?.status !== 'skipped' && (
+                      <button type="button" role="menuitem" onClick={() => { tr.request(m, trTarget); setMenuFor(null); }}>
+                        <TranslateIcon />Translate
+                      </button>
+                    )}
                     {m.messageType === 'text' && m.content && (
                       <button type="button" role="menuitem" onClick={() => copyText(m)}>
                         {copiedId === String(m._id) ? (<><CheckIcon />Copied</>) : (<><CopyIcon />Copy text</>)}
